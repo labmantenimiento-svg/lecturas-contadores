@@ -1,0 +1,246 @@
+:root {
+  --bg: #f4f7f9;
+  --panel: #ffffff;
+  --ink: #16232c;
+  --muted: #65717c;
+  --line: #dce4e8;
+  --accent: #23695d;
+  --electric: #c98912;
+  --water: #137fa5;
+  --danger: #b94a48;
+  --shadow: 0 10px 30px rgba(22, 35, 44, 0.08);
+  color-scheme: light;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.dark {
+  --bg: #11171c;
+  --panel: #182129;
+  --ink: #edf3f6;
+  --muted: #a7b3bc;
+  --line: #2d3a43;
+  --accent: #58b7a3;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button, input, select {
+  font: inherit;
+}
+
+button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.topbar {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: 18px clamp(14px, 3vw, 28px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h1, h2, p { margin-top: 0; }
+
+h1 {
+  margin-bottom: 6px;
+  font-size: clamp(24px, 3vw, 36px);
+  letter-spacing: 0;
+}
+
+.topbar p, .status {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.top-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+main {
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.config-panel, .cards, .workspace, .charts, .filters, .form-grid, .form-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.config-panel {
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: end;
+}
+
+.cards {
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+}
+
+.card, .panel, .config-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.card {
+  padding: 14px;
+}
+
+.card span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.card strong {
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.panel {
+  padding: 16px;
+}
+
+.panel-head {
+  border-bottom: 1px solid var(--line);
+  margin: -16px -16px 16px;
+  padding: 14px 16px;
+}
+
+.workspace {
+  grid-template-columns: minmax(300px, 440px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.filters {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  margin-bottom: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.wide { min-width: 0; }
+
+label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+input, select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 7px 10px;
+}
+
+input[readonly] {
+  color: var(--muted);
+}
+
+.table-wrap {
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+table {
+  width: 100%;
+  min-width: 840px;
+  border-collapse: collapse;
+}
+
+th, td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+th:first-child, td:first-child,
+th:nth-child(2), td:nth-child(2) {
+  text-align: left;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
+.charts {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+}
+
+.charts canvas {
+  width: 100%;
+  min-height: 280px;
+}
+
+@media (max-width: 1050px) {
+  .topbar, .workspace {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .config-panel, .cards, .charts {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  main { padding: 12px; }
+  .config-panel, .cards, .charts, .form-grid, .filters, .form-actions {
+    grid-template-columns: 1fr;
+  }
+}
