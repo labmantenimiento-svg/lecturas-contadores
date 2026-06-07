@@ -1,13 +1,16 @@
 :root {
   --bg: #f4f7f9;
-  --panel: #ffffff;
+  --panel: #fff;
   --ink: #16232c;
   --muted: #65717c;
   --line: #dce4e8;
   --accent: #23695d;
   --electric: #c98912;
+  --electric-soft: #fff5df;
   --water: #137fa5;
+  --water-soft: #e8f7fc;
   --danger: #b94a48;
+  --ok: #2f7d55;
   --shadow: 0 10px 30px rgba(22, 35, 44, 0.08);
   color-scheme: light;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -20,6 +23,8 @@ body.dark {
   --muted: #a7b3bc;
   --line: #2d3a43;
   --accent: #58b7a3;
+  --electric-soft: #2d2412;
+  --water-soft: #102936;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
   color-scheme: dark;
 }
@@ -32,9 +37,7 @@ body {
   color: var(--ink);
 }
 
-button, input, select {
-  font: inherit;
-}
+button, input, select { font: inherit; }
 
 button {
   min-height: 38px;
@@ -47,6 +50,7 @@ button {
 }
 
 button:hover { border-color: var(--accent); }
+button:disabled { cursor: wait; opacity: 0.65; }
 
 .primary {
   background: var(--accent);
@@ -64,13 +68,16 @@ button:hover { border-color: var(--accent); }
   gap: 16px;
 }
 
-h1, h2, p { margin-top: 0; }
+h1, h2, h3, p { margin-top: 0; }
 
 h1 {
   margin-bottom: 6px;
   font-size: clamp(24px, 3vw, 36px);
   letter-spacing: 0;
 }
+
+h2 { font-size: 17px; margin-bottom: 0; }
+h3 { font-size: 14px; margin-bottom: 10px; }
 
 .topbar p, .status {
   color: var(--muted);
@@ -92,7 +99,7 @@ main {
   gap: 16px;
 }
 
-.config-panel, .cards, .workspace, .charts, .filters, .form-grid, .form-actions {
+.config-panel, .cards, .workspace, .charts, .filters, .form-actions, .main-tabs {
   display: grid;
   gap: 12px;
 }
@@ -102,8 +109,31 @@ main {
   align-items: end;
 }
 
+.main-tabs {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.tab {
+  min-height: 48px;
+  font-weight: 800;
+  background: var(--panel);
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.tab-view { display: none; }
+.tab-view.active { display: grid; gap: 16px; }
+
 .cards {
-  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+}
+
+.water-cards {
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
 }
 
 .card, .panel, .config-panel {
@@ -113,9 +143,7 @@ main {
   box-shadow: var(--shadow);
 }
 
-.card {
-  padding: 14px;
-}
+.card { padding: 14px; }
 
 .card span {
   display: block;
@@ -125,13 +153,11 @@ main {
 }
 
 .card strong {
-  font-size: 22px;
+  font-size: 21px;
   overflow-wrap: anywhere;
 }
 
-.panel {
-  padding: 16px;
-}
+.panel { padding: 16px; }
 
 .panel-head {
   border-bottom: 1px solid var(--line);
@@ -140,22 +166,46 @@ main {
 }
 
 .workspace {
-  grid-template-columns: minmax(300px, 440px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 470px) minmax(0, 1fr);
   align-items: start;
 }
 
-.form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.meter-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.meter-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+  display: grid;
+  gap: 9px;
+}
+
+.meter-block label, .field {
+  display: grid;
+  gap: 5px;
 }
 
 .filters {
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
   margin-bottom: 14px;
 }
 
-.field {
-  display: grid;
-  gap: 5px;
+.form-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.total-line {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .wide { min-width: 0; }
@@ -178,12 +228,10 @@ input, select {
   padding: 7px 10px;
 }
 
-input[readonly] {
-  color: var(--muted);
-}
+input[readonly] { color: var(--muted); }
 
 .table-wrap {
-  max-height: 460px;
+  max-height: 430px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -191,7 +239,7 @@ input[readonly] {
 
 table {
   width: 100%;
-  min-width: 840px;
+  min-width: 780px;
   border-collapse: collapse;
 }
 
@@ -218,29 +266,85 @@ thead th {
 }
 
 .charts {
-  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+}
+
+.waterView .charts, .charts.compact {
+  align-items: stretch;
+}
+
+.charts .panel {
+  min-height: 300px;
 }
 
 .charts canvas {
   width: 100%;
-  min-height: 280px;
+  height: 230px;
+  max-height: 230px;
 }
 
-@media (max-width: 1050px) {
-  .topbar, .workspace {
-    grid-template-columns: 1fr;
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius: 8px;
+  padding: 12px 14px;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 20;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.ok { border-color: var(--ok); }
+.toast.error { border-color: var(--danger); }
+
+@media (max-width: 1150px) {
+  .topbar {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .config-panel, .cards, .charts {
+  .config-panel, .cards, .water-cards, .charts {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 700px) {
   main { padding: 12px; }
-  .config-panel, .cards, .charts, .form-grid, .filters, .form-actions {
+  .config-panel, .cards, .water-cards, .charts, .filters, .form-actions, .main-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .top-actions {
+    width: 100%;
+  }
+
+  .top-actions button {
+    flex: 1 1 160px;
+  }
+
+  .charts canvas {
+    height: 210px;
+    max-height: 210px;
+  }
+
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
   }
 }

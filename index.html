@@ -6,17 +6,19 @@
   <title>Lecturas de contadores</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="seedData.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <div>
       <h1>Lecturas de contadores</h1>
-      <p>Agua y electricidad con Google Sheets como base de datos.</p>
+      <p>Contadores reales de agua y electricidad sincronizados con Google Sheets.</p>
     </div>
     <div class="top-actions">
       <button id="themeToggle" type="button" title="Cambiar tema">◐</button>
       <button id="refreshBtn" type="button">Actualizar</button>
+      <button id="importHistoryBtn" type="button">Importar lecturas históricas</button>
       <button id="exportCsvBtn" type="button">Exportar CSV</button>
     </div>
   </header>
@@ -27,138 +29,136 @@
         <label for="apiUrl">URL de Google Apps Script</label>
         <input id="apiUrl" type="url" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
       </div>
-      <button id="saveConfigBtn" type="button" class="primary">Guardar configuracion</button>
+      <button id="saveConfigBtn" type="button" class="primary">Guardar configuración</button>
       <span id="status" class="status">Sin conectar</span>
     </section>
 
-    <section class="cards">
-      <article class="card">
-        <span>Consumo diario</span>
-        <strong id="dailyConsumption">0</strong>
-      </article>
-      <article class="card">
-        <span>Consumo mensual</span>
-        <strong id="monthlyConsumption">0</strong>
-      </article>
-      <article class="card">
-        <span>Consumo anual</span>
-        <strong id="annualConsumption">0</strong>
-      </article>
-      <article class="card">
-        <span>Coste mensual</span>
-        <strong id="monthlyCost">0 €</strong>
-      </article>
-      <article class="card">
-        <span>Coste anual</span>
-        <strong id="annualCost">0 €</strong>
-      </article>
-      <article class="card">
-        <span>Ultima lectura</span>
-        <strong id="lastReading">-</strong>
-      </article>
-    </section>
+    <nav class="main-tabs" aria-label="Pestañas de contadores">
+      <button type="button" class="tab active" data-tab="electric">⚡ Contador eléctrico</button>
+      <button type="button" class="tab" data-tab="water">💧 Contador de agua</button>
+    </nav>
 
-    <section class="workspace">
-      <form id="readingForm" class="panel">
-        <div class="panel-head">
-          <h2>Nueva lectura</h2>
-        </div>
-        <div class="form-grid">
-          <div class="field">
-            <label for="date">Fecha</label>
-            <input id="date" type="date" required>
-          </div>
-          <div class="field">
-            <label for="type">Tipo</label>
-            <select id="type" required>
-              <option value="Electricidad">⚡ Electricidad</option>
-              <option value="Agua">💧 Agua</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="previousReading">Lectura anterior</label>
-            <input id="previousReading" type="number" min="0" step="0.001" readonly>
-          </div>
-          <div class="field">
-            <label for="currentReading">Lectura actual</label>
-            <input id="currentReading" type="number" min="0" step="0.001" required>
-          </div>
-          <div class="field">
-            <label for="consumption">Consumo automatico</label>
-            <input id="consumption" type="number" step="0.001" readonly>
-          </div>
-          <div class="field">
-            <label for="unitPrice">Precio unidad</label>
-            <input id="unitPrice" type="number" min="0" step="0.0001" required>
-          </div>
-          <div class="field">
-            <label for="cost">Coste automatico</label>
-            <input id="cost" type="number" step="0.01" readonly>
-          </div>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="primary">Guardar lectura</button>
-          <button type="reset">Limpiar</button>
-        </div>
-      </form>
+    <section id="electricView" class="tab-view active">
+      <section class="cards electric-cards">
+        <article class="card"><span>Última lectura eléctrica</span><strong id="electricLastDate">-</strong></article>
+        <article class="card"><span>Consumo diario total</span><strong id="electricDaily">0 kWh</strong></article>
+        <article class="card"><span>Consumo mensual total</span><strong id="electricMonthly">0 kWh</strong></article>
+        <article class="card"><span>Consumo anual total</span><strong id="electricAnnual">0 kWh</strong></article>
+        <article class="card"><span>Último MEDIDA 1 (0,18)</span><strong id="last018">-</strong></article>
+        <article class="card"><span>Último MEDIDA 1 (0,58)</span><strong id="last058">-</strong></article>
+        <article class="card"><span>Último MEDIDA 1 (0,88)</span><strong id="last088">-</strong></article>
+      </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Filtros y busqueda</h2>
-        </div>
-        <div class="filters">
+      <section class="workspace">
+        <form id="electricForm" class="panel">
+          <div class="panel-head"><h2>Nueva lectura eléctrica</h2></div>
           <div class="field">
-            <label for="filterType">Tipo</label>
-            <select id="filterType">
-              <option value="Todos">Todos</option>
-              <option value="Electricidad">Electricidad</option>
-              <option value="Agua">Agua</option>
-            </select>
+            <label for="electricDate">Fecha</label>
+            <input id="electricDate" type="date" required>
           </div>
-          <div class="field">
-            <label for="periodFilter">Periodo</label>
-            <select id="periodFilter">
-              <option value="day">Dia</option>
-              <option value="month" selected>Mes</option>
-              <option value="year">Ano</option>
-            </select>
+          <div class="meter-grid">
+            <div class="meter-block">
+              <h3>MEDIDA 1 (0,18)</h3>
+              <label>Lectura anterior<input id="electric018Prev" type="number" readonly></label>
+              <label>Lectura actual<input id="electric018Now" type="number" min="0" step="0.001" required></label>
+              <label>Consumo automático<input id="electric018Use" type="number" readonly></label>
+            </div>
+            <div class="meter-block">
+              <h3>MEDIDA 1 (0,58)</h3>
+              <label>Lectura anterior<input id="electric058Prev" type="number" readonly></label>
+              <label>Lectura actual<input id="electric058Now" type="number" min="0" step="0.001" required></label>
+              <label>Consumo automático<input id="electric058Use" type="number" readonly></label>
+            </div>
+            <div class="meter-block">
+              <h3>MEDIDA 1 (0,88)</h3>
+              <label>Lectura anterior<input id="electric088Prev" type="number" readonly></label>
+              <label>Lectura actual<input id="electric088Now" type="number" min="0" step="0.001" required></label>
+              <label>Consumo automático<input id="electric088Use" type="number" readonly></label>
+            </div>
           </div>
-          <div class="field">
-            <label for="fromDate">Desde</label>
-            <input id="fromDate" type="date">
+          <div class="total-line">Consumo total eléctrico: <strong id="electricTotal">0 kWh</strong></div>
+          <div class="form-actions">
+            <button id="saveElectricBtn" type="submit" class="primary">Guardar lectura</button>
+            <button type="reset">Limpiar</button>
           </div>
-          <div class="field">
-            <label for="toDate">Hasta</label>
-            <input id="toDate" type="date">
+        </form>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Lecturas eléctricas</h2></div>
+          <div class="filters">
+            <div class="field"><label for="electricFrom">Desde</label><input id="electricFrom" type="date"></div>
+            <div class="field"><label for="electricTo">Hasta</label><input id="electricTo" type="date"></div>
+            <div class="field"><label for="electricPeriod">Agrupar</label><select id="electricPeriod"><option value="day">Día</option><option value="month" selected>Mes</option><option value="year">Año</option></select></div>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Tipo</th>
-                <th>Lectura anterior</th>
-                <th>Lectura actual</th>
-                <th>Consumo</th>
-                <th>Precio unidad</th>
-                <th>Coste</th>
-              </tr>
-            </thead>
-            <tbody id="readingsBody"></tbody>
-          </table>
-        </div>
+          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Unidad</th></tr></thead><tbody id="electricBody"></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="charts compact">
+        <article class="panel"><h2>Diario por medida</h2><canvas id="electricDailyChart"></canvas></article>
+        <article class="panel"><h2>Mensual total eléctrico</h2><canvas id="electricMonthlyChart"></canvas></article>
+        <article class="panel"><h2>Anual total eléctrico</h2><canvas id="electricAnnualChart"></canvas></article>
       </section>
     </section>
 
-    <section class="charts">
-      <article class="panel"><h2>Electricidad diaria</h2><canvas id="electricDayChart"></canvas></article>
-      <article class="panel"><h2>Electricidad mensual</h2><canvas id="electricMonthChart"></canvas></article>
-      <article class="panel"><h2>Electricidad anual</h2><canvas id="electricYearChart"></canvas></article>
-      <article class="panel"><h2>Agua diaria</h2><canvas id="waterDayChart"></canvas></article>
-      <article class="panel"><h2>Agua mensual</h2><canvas id="waterMonthChart"></canvas></article>
-      <article class="panel"><h2>Agua anual</h2><canvas id="waterYearChart"></canvas></article>
+    <section id="waterView" class="tab-view">
+      <section class="cards water-cards">
+        <article class="card"><span>Última lectura de agua</span><strong id="waterLastDate">-</strong></article>
+        <article class="card"><span>Consumo diario total</span><strong id="waterDaily">0 m³</strong></article>
+        <article class="card"><span>Consumo mensual total</span><strong id="waterMonthly">0 m³</strong></article>
+        <article class="card"><span>Consumo anual total</span><strong id="waterAnnual">0 m³</strong></article>
+        <article class="card"><span>Último Agua Potable</span><strong id="lastPotable">-</strong></article>
+        <article class="card"><span>Último Agua PCI</span><strong id="lastPci">-</strong></article>
+      </section>
+
+      <section class="workspace">
+        <form id="waterForm" class="panel">
+          <div class="panel-head"><h2>Nueva lectura de agua</h2></div>
+          <div class="field">
+            <label for="waterDate">Fecha</label>
+            <input id="waterDate" type="date" required>
+          </div>
+          <div class="meter-grid">
+            <div class="meter-block">
+              <h3>Agua Potable METER-2-1</h3>
+              <label>Lectura anterior<input id="waterPotablePrev" type="number" readonly></label>
+              <label>Lectura actual<input id="waterPotableNow" type="number" min="0" step="0.001" required></label>
+              <label>Consumo automático<input id="waterPotableUse" type="number" readonly></label>
+            </div>
+            <div class="meter-block">
+              <h3>Agua PCI METER-2-2</h3>
+              <label>Lectura anterior<input id="waterPciPrev" type="number" readonly></label>
+              <label>Lectura actual<input id="waterPciNow" type="number" min="0" step="0.001" required></label>
+              <label>Consumo automático<input id="waterPciUse" type="number" readonly></label>
+            </div>
+          </div>
+          <div class="total-line">Consumo total agua: <strong id="waterTotal">0 m³</strong></div>
+          <div class="form-actions">
+            <button id="saveWaterBtn" type="submit" class="primary">Guardar lectura</button>
+            <button type="reset">Limpiar</button>
+          </div>
+        </form>
+
+        <section class="panel">
+          <div class="panel-head"><h2>Lecturas de agua</h2></div>
+          <div class="filters">
+            <div class="field"><label for="waterFrom">Desde</label><input id="waterFrom" type="date"></div>
+            <div class="field"><label for="waterTo">Hasta</label><input id="waterTo" type="date"></div>
+            <div class="field"><label for="waterPeriod">Agrupar</label><select id="waterPeriod"><option value="day">Día</option><option value="month" selected>Mes</option><option value="year">Año</option></select></div>
+          </div>
+          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Unidad</th></tr></thead><tbody id="waterBody"></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="charts compact">
+        <article class="panel"><h2>Diario Agua Potable</h2><canvas id="waterPotableChart"></canvas></article>
+        <article class="panel"><h2>Diario Agua PCI</h2><canvas id="waterPciChart"></canvas></article>
+        <article class="panel"><h2>Mensual total agua</h2><canvas id="waterMonthlyChart"></canvas></article>
+        <article class="panel"><h2>Anual total agua</h2><canvas id="waterAnnualChart"></canvas></article>
+      </section>
     </section>
   </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

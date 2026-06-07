@@ -1,10 +1,32 @@
 const CONFIG_KEY = "contador.config.v1";
 const THEME_KEY = "contador.theme.v1";
 
+const CATEGORIES = {
+  electric: {
+    label: "Electricidad",
+    unit: "kWh",
+    counters: [
+      { key: "018", name: "MEDIDA 1 (0,18)" },
+      { key: "058", name: "MEDIDA 1 (0,58)" },
+      { key: "088", name: "MEDIDA 1 (0,88)" }
+    ]
+  },
+  water: {
+    label: "Agua",
+    unit: "m³",
+    counters: [
+      { key: "potable", name: "Agua Potable METER-2-1" },
+      { key: "pci", name: "Agua PCI METER-2-2" }
+    ]
+  }
+};
+
 const state = {
   apiUrl: "",
+  activeTab: "electric",
   readings: [],
-  charts: {}
+  charts: {},
+  saving: false
 };
 
 const els = {
@@ -12,72 +34,118 @@ const els = {
   saveConfigBtn: document.getElementById("saveConfigBtn"),
   status: document.getElementById("status"),
   refreshBtn: document.getElementById("refreshBtn"),
+  importHistoryBtn: document.getElementById("importHistoryBtn"),
   exportCsvBtn: document.getElementById("exportCsvBtn"),
   themeToggle: document.getElementById("themeToggle"),
-  form: document.getElementById("readingForm"),
-  date: document.getElementById("date"),
-  type: document.getElementById("type"),
-  previousReading: document.getElementById("previousReading"),
-  currentReading: document.getElementById("currentReading"),
-  consumption: document.getElementById("consumption"),
-  unitPrice: document.getElementById("unitPrice"),
-  cost: document.getElementById("cost"),
-  filterType: document.getElementById("filterType"),
-  periodFilter: document.getElementById("periodFilter"),
-  fromDate: document.getElementById("fromDate"),
-  toDate: document.getElementById("toDate"),
-  readingsBody: document.getElementById("readingsBody"),
-  dailyConsumption: document.getElementById("dailyConsumption"),
-  monthlyConsumption: document.getElementById("monthlyConsumption"),
-  annualConsumption: document.getElementById("annualConsumption"),
-  monthlyCost: document.getElementById("monthlyCost"),
-  annualCost: document.getElementById("annualCost"),
-  lastReading: document.getElementById("lastReading")
+  tabs: document.querySelectorAll(".tab"),
+  electricView: document.getElementById("electricView"),
+  waterView: document.getElementById("waterView"),
+  toast: document.getElementById("toast"),
+  electricForm: document.getElementById("electricForm"),
+  waterForm: document.getElementById("waterForm"),
+  saveElectricBtn: document.getElementById("saveElectricBtn"),
+  saveWaterBtn: document.getElementById("saveWaterBtn"),
+  electricDate: document.getElementById("electricDate"),
+  waterDate: document.getElementById("waterDate"),
+  electricBody: document.getElementById("electricBody"),
+  waterBody: document.getElementById("waterBody"),
+  electricFrom: document.getElementById("electricFrom"),
+  electricTo: document.getElementById("electricTo"),
+  electricPeriod: document.getElementById("electricPeriod"),
+  waterFrom: document.getElementById("waterFrom"),
+  waterTo: document.getElementById("waterTo"),
+  waterPeriod: document.getElementById("waterPeriod"),
+  electricLastDate: document.getElementById("electricLastDate"),
+  electricDaily: document.getElementById("electricDaily"),
+  electricMonthly: document.getElementById("electricMonthly"),
+  electricAnnual: document.getElementById("electricAnnual"),
+  last018: document.getElementById("last018"),
+  last058: document.getElementById("last058"),
+  last088: document.getElementById("last088"),
+  waterLastDate: document.getElementById("waterLastDate"),
+  waterDaily: document.getElementById("waterDaily"),
+  waterMonthly: document.getElementById("waterMonthly"),
+  waterAnnual: document.getElementById("waterAnnual"),
+  lastPotable: document.getElementById("lastPotable"),
+  lastPci: document.getElementById("lastPci")
 };
 
-const chartDefs = [
-  ["electricDayChart", "Electricidad", "day", "#c98912"],
-  ["electricMonthChart", "Electricidad", "month", "#c98912"],
-  ["electricYearChart", "Electricidad", "year", "#c98912"],
-  ["waterDayChart", "Agua", "day", "#137fa5"],
-  ["waterMonthChart", "Agua", "month", "#137fa5"],
-  ["waterYearChart", "Agua", "year", "#137fa5"]
-];
+const fields = {
+  electric: {
+    "MEDIDA 1 (0,18)": {
+      previous: document.getElementById("electric018Prev"),
+      current: document.getElementById("electric018Now"),
+      consumption: document.getElementById("electric018Use")
+    },
+    "MEDIDA 1 (0,58)": {
+      previous: document.getElementById("electric058Prev"),
+      current: document.getElementById("electric058Now"),
+      consumption: document.getElementById("electric058Use")
+    },
+    "MEDIDA 1 (0,88)": {
+      previous: document.getElementById("electric088Prev"),
+      current: document.getElementById("electric088Now"),
+      consumption: document.getElementById("electric088Use")
+    },
+    total: document.getElementById("electricTotal")
+  },
+  water: {
+    "Agua Potable METER-2-1": {
+      previous: document.getElementById("waterPotablePrev"),
+      current: document.getElementById("waterPotableNow"),
+      consumption: document.getElementById("waterPotableUse")
+    },
+    "Agua PCI METER-2-2": {
+      previous: document.getElementById("waterPciPrev"),
+      current: document.getElementById("waterPciNow"),
+      consumption: document.getElementById("waterPciUse")
+    },
+    total: document.getElementById("waterTotal")
+  }
+};
 
 function init() {
   const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}");
   state.apiUrl = config.apiUrl || "";
   els.apiUrl.value = state.apiUrl;
-  els.date.valueAsDate = new Date();
+  const today = new Date();
+  els.electricDate.valueAsDate = today;
+  els.waterDate.valueAsDate = today;
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
   bindEvents();
-  updatePreviousReading();
-  calculateForm();
   loadData();
 }
 
 function bindEvents() {
   els.saveConfigBtn.addEventListener("click", saveConfig);
   els.refreshBtn.addEventListener("click", loadData);
+  els.importHistoryBtn.addEventListener("click", importHistoricalReadings);
   els.exportCsvBtn.addEventListener("click", exportCsv);
   els.themeToggle.addEventListener("click", toggleTheme);
-  els.form.addEventListener("submit", saveReading);
-  els.form.addEventListener("reset", () => setTimeout(() => {
-    els.date.valueAsDate = new Date();
-    updatePreviousReading();
-    calculateForm();
-  }));
-  [els.type, els.currentReading, els.unitPrice].forEach(el => el.addEventListener("input", () => {
-    updatePreviousReading();
-    calculateForm();
-  }));
-  [els.filterType, els.periodFilter, els.fromDate, els.toDate].forEach(el => el.addEventListener("change", render));
+  els.tabs.forEach(tab => tab.addEventListener("click", () => setTab(tab.dataset.tab)));
+  els.electricForm.addEventListener("submit", event => saveCategory(event, "electric"));
+  els.waterForm.addEventListener("submit", event => saveCategory(event, "water"));
+  els.electricForm.addEventListener("reset", () => setTimeout(() => resetForm("electric")));
+  els.waterForm.addEventListener("reset", () => setTimeout(() => resetForm("water")));
+  [els.electricFrom, els.electricTo, els.electricPeriod, els.waterFrom, els.waterTo, els.waterPeriod].forEach(el => el.addEventListener("change", render));
+  for (const category of ["electric", "water"]) {
+    for (const group of Object.values(fields[category])) {
+      if (group.current) group.current.addEventListener("input", () => calculateCategory(category));
+    }
+  }
+}
+
+function setTab(tab) {
+  state.activeTab = tab;
+  els.tabs.forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
+  els.electricView.classList.toggle("active", tab === "electric");
+  els.waterView.classList.toggle("active", tab === "water");
 }
 
 function saveConfig() {
   state.apiUrl = els.apiUrl.value.trim();
   localStorage.setItem(CONFIG_KEY, JSON.stringify({ apiUrl: state.apiUrl }));
-  setStatus("Configuracion guardada");
+  setStatus("Configuración guardada");
   loadData();
 }
 
@@ -89,161 +157,312 @@ async function loadData() {
   }
   try {
     setStatus("Cargando datos...");
-    const res = await fetch(`${state.apiUrl}?action=list`);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || "Respuesta no valida");
+    const response = await fetch(`${state.apiUrl}?action=list`);
+    const json = await response.json();
+    if (!json.ok) throw new Error(json.error || "Respuesta no válida");
     state.readings = normalizeRows(json.data || []);
     setStatus("Datos sincronizados con Google Sheets");
   } catch (error) {
     setStatus(`Error: ${error.message}`);
   }
-  updatePreviousReading();
-  calculateForm();
+  fillPreviousReadings();
   render();
 }
 
-async function saveReading(event) {
+async function saveCategory(event, category) {
   event.preventDefault();
+  if (state.saving) return;
   if (!state.apiUrl) {
-    alert("Primero configura la URL de Google Apps Script.");
+    showToast("❌ Configura primero la URL de Apps Script", "error");
     return;
   }
-  calculateForm();
-  const payload = {
-    fecha: els.date.value,
-    tipo: els.type.value,
-    lecturaAnterior: numberValue(els.previousReading.value),
-    lecturaActual: numberValue(els.currentReading.value),
-    consumo: numberValue(els.consumption.value),
-    precioUnidad: numberValue(els.unitPrice.value),
-    coste: numberValue(els.cost.value)
-  };
+
+  const button = category === "electric" ? els.saveElectricBtn : els.saveWaterBtn;
+  const originalText = button.textContent;
+  state.saving = true;
+  button.disabled = true;
+  button.textContent = "Guardando...";
+
   try {
-    setStatus("Guardando en Google Sheets...");
-    const res = await fetch(state.apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
-    });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || "No se pudo guardar");
-    els.form.reset();
-    els.date.valueAsDate = new Date();
+    const rows = buildRowsFromForm(category);
+    const freshRows = removeExistingRows(rows);
+    if (!freshRows.length) {
+      showToast("✅ Esa lectura ya existe, no se duplicó", "ok");
+      return;
+    }
+    await postRows(freshRows, "saveBatch");
+    showToast("✅ Lectura guardada correctamente", "ok");
+    resetForm(category);
     await loadData();
-    setStatus("Lectura guardada en Google Sheets");
   } catch (error) {
     setStatus(`Error: ${error.message}`);
-    alert("No se pudo guardar. Revisa la URL del Apps Script y los permisos.");
+    showToast("❌ Error al guardar la lectura", "error");
+  } finally {
+    state.saving = false;
+    button.disabled = false;
+    button.textContent = originalText;
   }
+}
+
+async function importHistoricalReadings() {
+  if (!state.apiUrl) {
+    showToast("❌ Configura primero la URL de Apps Script", "error");
+    return;
+  }
+  if (!confirm("Esto importará las lecturas históricas. ¿Continuar?")) return;
+  try {
+    els.importHistoryBtn.disabled = true;
+    els.importHistoryBtn.textContent = "Importando...";
+    const historical = normalizeRows(window.HISTORICAL_READINGS || []);
+    const rows = removeExistingRows(historical);
+    if (!rows.length) {
+      showToast("✅ Las lecturas históricas ya estaban importadas", "ok");
+      return;
+    }
+    const result = await postRows(rows, "importBatch");
+    showToast(`✅ Importadas ${result.inserted || rows.length} lecturas históricas`, "ok");
+    await loadData();
+  } catch (error) {
+    setStatus(`Error: ${error.message}`);
+    showToast("❌ Error al importar lecturas históricas", "error");
+  } finally {
+    els.importHistoryBtn.disabled = false;
+    els.importHistoryBtn.textContent = "Importar lecturas históricas";
+  }
+}
+
+async function postRows(rows, action) {
+  const response = await fetch(state.apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action, rows })
+  });
+  const json = await response.json();
+  if (!json.ok) throw new Error(json.error || "No se pudo guardar");
+  return json;
+}
+
+function buildRowsFromForm(category) {
+  calculateCategory(category);
+  const config = CATEGORIES[category];
+  const date = category === "electric" ? els.electricDate.value : els.waterDate.value;
+  return config.counters.map(counter => {
+    const group = fields[category][counter.name];
+    return {
+      Fecha: date,
+      Categoria: config.label,
+      Contador: counter.name,
+      "Lectura Anterior": numberValue(group.previous.value),
+      "Lectura Actual": numberValue(group.current.value),
+      Consumo: numberValue(group.consumption.value),
+      Unidad: config.unit
+    };
+  });
+}
+
+function removeExistingRows(rows) {
+  const existing = new Set(state.readings.map(rowKey));
+  return rows.filter(row => !existing.has(rowKey(row)));
+}
+
+function rowKey(row) {
+  return `${row.Fecha}|${row.Categoria}|${row.Contador}|${numberValue(row["Lectura Actual"])}`;
 }
 
 function normalizeRows(rows) {
   return rows.map(row => ({
-    fecha: row.Fecha || row.fecha,
-    tipo: row.Tipo || row.tipo,
-    lecturaAnterior: numberValue(row["Lectura Anterior"] ?? row.lecturaAnterior),
-    lecturaActual: numberValue(row["Lectura Actual"] ?? row.lecturaActual),
-    consumo: numberValue(row.Consumo ?? row.consumo),
-    precioUnidad: numberValue(row["Precio Unidad"] ?? row.precioUnidad),
-    coste: numberValue(row.Coste ?? row.coste)
-  })).filter(row => row.fecha && row.tipo).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    Fecha: row.Fecha || row.fecha,
+    Categoria: row.Categoria || row.categoria || row.Tipo || row.tipo,
+    Contador: row.Contador || row.contador || row.Tipo || row.tipo,
+    "Lectura Anterior": numberValue(row["Lectura Anterior"] ?? row.lecturaAnterior),
+    "Lectura Actual": numberValue(row["Lectura Actual"] ?? row.lecturaActual),
+    Consumo: numberValue(row.Consumo ?? row.consumo),
+    Unidad: row.Unidad || row.unidad || (row.Tipo === "Agua" ? "m³" : "kWh")
+  })).filter(row => row.Fecha && row.Categoria && row.Contador).sort((a, b) => a.Fecha.localeCompare(b.Fecha));
 }
 
-function updatePreviousReading() {
-  const last = [...state.readings].reverse().find(row => row.tipo === els.type.value);
-  els.previousReading.value = last ? last.lecturaActual : 0;
-}
-
-function calculateForm() {
-  const previous = numberValue(els.previousReading.value);
-  const current = numberValue(els.currentReading.value);
-  const price = numberValue(els.unitPrice.value);
-  const consumption = Math.max(0, current - previous);
-  els.consumption.value = Number.isFinite(consumption) ? consumption.toFixed(3) : "0.000";
-  els.cost.value = Number.isFinite(consumption * price) ? (consumption * price).toFixed(2) : "0.00";
-}
-
-function filteredRows() {
-  return state.readings.filter(row => {
-    const typeOk = els.filterType.value === "Todos" || row.tipo === els.filterType.value;
-    const fromOk = !els.fromDate.value || row.fecha >= els.fromDate.value;
-    const toOk = !els.toDate.value || row.fecha <= els.toDate.value;
-    return typeOk && fromOk && toOk;
-  });
-}
-
-function render() {
-  const rows = filteredRows();
-  renderSummary(rows);
-  renderTable(rows);
-  renderCharts();
-}
-
-function renderSummary(rows) {
-  const now = new Date();
-  const today = toKey(now, "day");
-  const month = toKey(now, "month");
-  const year = toKey(now, "year");
-  els.dailyConsumption.textContent = fmt(sum(rows.filter(r => toKey(r.fecha, "day") === today), "consumo"));
-  els.monthlyConsumption.textContent = fmt(sum(rows.filter(r => toKey(r.fecha, "month") === month), "consumo"));
-  els.annualConsumption.textContent = fmt(sum(rows.filter(r => toKey(r.fecha, "year") === year), "consumo"));
-  els.monthlyCost.textContent = money(sum(rows.filter(r => toKey(r.fecha, "month") === month), "coste"));
-  els.annualCost.textContent = money(sum(rows.filter(r => toKey(r.fecha, "year") === year), "coste"));
-  const last = [...state.readings].sort((a, b) => a.fecha.localeCompare(b.fecha)).at(-1);
-  els.lastReading.textContent = last ? `${formatDate(last.fecha)} · ${last.tipo} · ${fmt(last.lecturaActual)}` : "-";
-}
-
-function renderTable(rows) {
-  els.readingsBody.innerHTML = rows.map(row => `
-    <tr>
-      <td>${formatDate(row.fecha)}</td>
-      <td>${row.tipo === "Agua" ? "💧 Agua" : "⚡ Electricidad"}</td>
-      <td>${fmt(row.lecturaAnterior)}</td>
-      <td>${fmt(row.lecturaActual)}</td>
-      <td>${fmt(row.consumo)}</td>
-      <td>${money(row.precioUnidad, 4)}</td>
-      <td>${money(row.coste)}</td>
-    </tr>
-  `).join("");
-}
-
-function renderCharts() {
-  for (const [canvasId, type, period, color] of chartDefs) {
-    const canvas = document.getElementById(canvasId);
-    const grouped = groupRows(state.readings.filter(row => row.tipo === type), period);
-    const labels = Object.keys(grouped).sort();
-    const data = labels.map(label => grouped[label]);
-    if (state.charts[canvasId]) state.charts[canvasId].destroy();
-    state.charts[canvasId] = new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels,
-        datasets: [{ label: "Consumo", data, backgroundColor: color }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { y: { beginAtZero: true } },
-        plugins: { legend: { display: false } }
-      }
-    });
+function fillPreviousReadings() {
+  for (const category of ["electric", "water"]) {
+    for (const counter of CATEGORIES[category].counters) {
+      const last = latestForCounter(counter.name);
+      fields[category][counter.name].previous.value = last ? last["Lectura Actual"] : 0;
+    }
+    calculateCategory(category);
   }
 }
 
-function groupRows(rows, period) {
-  return rows.reduce((acc, row) => {
-    const key = toKey(row.fecha, period);
-    acc[key] = (acc[key] || 0) + row.consumo;
-    return acc;
-  }, {});
+function calculateCategory(category) {
+  let total = 0;
+  for (const counter of CATEGORIES[category].counters) {
+    const group = fields[category][counter.name];
+    const previous = numberValue(group.previous.value);
+    const current = numberValue(group.current.value);
+    const consumption = Math.max(0, current - previous);
+    group.consumption.value = consumption.toFixed(3);
+    total += consumption;
+  }
+  fields[category].total.textContent = `${fmt(total)} ${CATEGORIES[category].unit}`;
+}
+
+function resetForm(category) {
+  const form = category === "electric" ? els.electricForm : els.waterForm;
+  form.reset();
+  const dateInput = category === "electric" ? els.electricDate : els.waterDate;
+  dateInput.valueAsDate = new Date();
+  fillPreviousReadings();
+}
+
+function render() {
+  fillPreviousReadings();
+  renderSummaries();
+  renderTables();
+  renderCharts();
+}
+
+function renderSummaries() {
+  const today = toKey(new Date(), "day");
+  const month = toKey(new Date(), "month");
+  const year = toKey(new Date(), "year");
+  renderCategorySummary("Electricidad", "electric", today, month, year);
+  renderCategorySummary("Agua", "water", today, month, year);
+}
+
+function renderCategorySummary(categoryName, tab, today, month, year) {
+  const rows = state.readings.filter(row => row.Categoria === categoryName);
+  const last = rows.at(-1);
+  const daily = sum(rows.filter(row => toKey(row.Fecha, "day") === today), "Consumo");
+  const monthly = sum(rows.filter(row => toKey(row.Fecha, "month") === month), "Consumo");
+  const annual = sum(rows.filter(row => toKey(row.Fecha, "year") === year), "Consumo");
+  if (tab === "electric") {
+    els.electricLastDate.textContent = last ? formatDate(last.Fecha) : "-";
+    els.electricDaily.textContent = `${fmt(daily)} kWh`;
+    els.electricMonthly.textContent = `${fmt(monthly)} kWh`;
+    els.electricAnnual.textContent = `${fmt(annual)} kWh`;
+    els.last018.textContent = fmtLatest("MEDIDA 1 (0,18)");
+    els.last058.textContent = fmtLatest("MEDIDA 1 (0,58)");
+    els.last088.textContent = fmtLatest("MEDIDA 1 (0,88)");
+  } else {
+    els.waterLastDate.textContent = last ? formatDate(last.Fecha) : "-";
+    els.waterDaily.textContent = `${fmt(daily)} m³`;
+    els.waterMonthly.textContent = `${fmt(monthly)} m³`;
+    els.waterAnnual.textContent = `${fmt(annual)} m³`;
+    els.lastPotable.textContent = fmtLatest("Agua Potable METER-2-1");
+    els.lastPci.textContent = fmtLatest("Agua PCI METER-2-2");
+  }
+}
+
+function renderTables() {
+  const electricRows = filteredRows("Electricidad", els.electricFrom.value, els.electricTo.value);
+  const waterRows = filteredRows("Agua", els.waterFrom.value, els.waterTo.value);
+  els.electricBody.innerHTML = electricRows.map(renderRow).join("");
+  els.waterBody.innerHTML = waterRows.map(renderRow).join("");
+}
+
+function renderRow(row) {
+  return `
+    <tr>
+      <td>${formatDate(row.Fecha)}</td>
+      <td>${row.Contador}</td>
+      <td>${fmt(row["Lectura Anterior"])}</td>
+      <td>${fmt(row["Lectura Actual"])}</td>
+      <td>${fmt(row.Consumo)}</td>
+      <td>${row.Unidad}</td>
+    </tr>
+  `;
+}
+
+function renderCharts() {
+  renderLineChart("electricDailyChart", dailyDatasets("Electricidad", CATEGORIES.electric.counters), "day");
+  renderBarChart("electricMonthlyChart", totalDataset("Electricidad", "month", "#c98912"));
+  renderBarChart("electricAnnualChart", totalDataset("Electricidad", "year", "#9a6a0e"));
+  renderBarChart("waterPotableChart", singleCounterDataset("Agua Potable METER-2-1", "day", "#137fa5"));
+  renderBarChart("waterPciChart", singleCounterDataset("Agua PCI METER-2-2", "day", "#52a6bd"));
+  renderBarChart("waterMonthlyChart", totalDataset("Agua", "month", "#137fa5"));
+  renderBarChart("waterAnnualChart", totalDataset("Agua", "year", "#0d5e7a"));
+}
+
+function dailyDatasets(category, counters) {
+  const labels = sortedLabels(state.readings.filter(row => row.Categoria === category), "day");
+  const colors = ["#c98912", "#6b6fb7", "#7a8c3a"];
+  return {
+    labels,
+    datasets: counters.map((counter, index) => ({
+      label: counter.name,
+      data: labels.map(label => sum(state.readings.filter(row => row.Categoria === category && row.Contador === counter.name && toKey(row.Fecha, "day") === label), "Consumo")),
+      borderColor: colors[index],
+      backgroundColor: colors[index],
+      tension: 0.25
+    }))
+  };
+}
+
+function totalDataset(category, period, color) {
+  const rows = state.readings.filter(row => row.Categoria === category);
+  const labels = sortedLabels(rows, period);
+  return {
+    labels,
+    datasets: [{ label: "Consumo total", data: labels.map(label => sum(rows.filter(row => toKey(row.Fecha, period) === label), "Consumo")), backgroundColor: color }]
+  };
+}
+
+function singleCounterDataset(counter, period, color) {
+  const rows = state.readings.filter(row => row.Contador === counter);
+  const labels = sortedLabels(rows, period);
+  return {
+    labels,
+    datasets: [{ label: counter, data: labels.map(label => sum(rows.filter(row => toKey(row.Fecha, period) === label), "Consumo")), backgroundColor: color }]
+  };
+}
+
+function renderLineChart(id, data) {
+  renderChart(id, "line", data);
+}
+
+function renderBarChart(id, data) {
+  renderChart(id, "bar", data);
+}
+
+function renderChart(id, type, data) {
+  const canvas = document.getElementById(id);
+  if (!canvas || !window.Chart) return;
+  if (state.charts[id]) state.charts[id].destroy();
+  state.charts[id] = new Chart(canvas, {
+    type,
+    data,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { y: { beginAtZero: true } },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 10 } } }
+    }
+  });
+}
+
+function filteredRows(category, from, to) {
+  return state.readings.filter(row => {
+    return row.Categoria === category && (!from || row.Fecha >= from) && (!to || row.Fecha <= to);
+  });
+}
+
+function sortedLabels(rows, period) {
+  return [...new Set(rows.map(row => toKey(row.Fecha, period)))].sort();
+}
+
+function latestForCounter(counter) {
+  return state.readings.filter(row => row.Contador === counter).sort((a, b) => a.Fecha.localeCompare(b.Fecha)).at(-1);
+}
+
+function fmtLatest(counter) {
+  const row = latestForCounter(counter);
+  return row ? fmt(row["Lectura Actual"]) : "-";
 }
 
 function exportCsv() {
-  const rows = filteredRows();
-  const header = ["Fecha", "Tipo", "Lectura Anterior", "Lectura Actual", "Consumo", "Precio Unidad", "Coste"];
-  const csv = [header, ...rows.map(row => [
-    row.fecha, row.tipo, row.lecturaAnterior, row.lecturaActual, row.consumo, row.precioUnidad, row.coste
-  ])].map(line => line.map(value => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+  const header = ["Fecha", "Categoria", "Contador", "Lectura Anterior", "Lectura Actual", "Consumo", "Unidad"];
+  const rows = state.readings;
+  const csv = [header, ...rows.map(row => header.map(col => row[col]))]
+    .map(line => line.map(value => `"${String(value ?? "").replaceAll('"', '""')}"`).join(","))
+    .join("\n");
   download("lecturas-contadores.csv", csv, "text/csv;charset=utf-8");
 }
 
@@ -293,12 +512,16 @@ function fmt(value) {
   return numberValue(value).toLocaleString("es-ES", { maximumFractionDigits: 3 });
 }
 
-function money(value, decimals = 2) {
-  return `${numberValue(value).toLocaleString("es-ES", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })} €`;
-}
-
 function setStatus(message) {
   els.status.textContent = message;
+}
+
+function showToast(message, type) {
+  els.toast.textContent = message;
+  els.toast.className = `toast show ${type}`;
+  setTimeout(() => {
+    els.toast.className = "toast";
+  }, 3000);
 }
 
 init();
