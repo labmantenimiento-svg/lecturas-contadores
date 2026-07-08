@@ -1,104 +1,131 @@
 # Lecturas de contadores
 
-Aplicacion web estatica para gestionar lecturas de agua y electricidad con Google Sheets como base de datos y Google Apps Script como API.
+Aplicación web estática para GitHub Pages conectada a Google Sheets mediante Google Apps Script.
+
+## Contadores incluidos
+
+Electricidad:
+- `MEDIDA 1 (0,18)`
+- `MEDIDA 1 (0,58)`
+- `MEDIDA 1 (0,88)`
+
+Agua:
+- `Agua Potable METER-2-1`
+- `Agua PCI METER-2-2`
 
 ## Archivos
 
-- `index.html`: estructura de la aplicacion.
-- `style.css`: diseno responsive con tema claro y oscuro.
-- `app.js`: logica, filtros, graficas, CSV y conexion con Apps Script.
-- `appscript.gs`: API para Google Apps Script.
-- `README.md`: instrucciones de instalacion.
+- `index.html`: interfaz con pestañas de electricidad y agua.
+- `style.css`: diseño responsive, tema claro/oscuro y gráficas compactas.
+- `app.js`: lógica de lectura, guardado, filtros, gráficos, CSV y deduplicado.
+- `seedData.js`: lecturas históricas generadas desde `MEDIDA Contador (1).txt`.
+- `lecturas_historicas_contadores.csv`: CSV histórico listo para copiar/pegar en Google Sheets.
+- `appscript.gs`: API GET/POST para Google Apps Script.
 
 ## Estructura de Google Sheets
 
-La hoja se llama `Lecturas` y usa estas columnas:
+La hoja debe llamarse `Lecturas` y tener estas columnas:
 
-| Fecha | Tipo | Lectura Anterior | Lectura Actual | Consumo | Precio Unidad | Coste |
+| Fecha | Categoria | Contador | Lectura Anterior | Lectura Actual | Consumo | Unidad |
 
-## 1. Crear Google Sheet
+Ejemplos:
 
-1. Entra en Google Drive.
-2. Crea una hoja de calculo nueva.
-3. Llamala `Lecturas contadores`.
-4. Crea una pestaña llamada `Lecturas`.
-5. En la primera fila escribe:
-   `Fecha`, `Tipo`, `Lectura Anterior`, `Lectura Actual`, `Consumo`, `Precio Unidad`, `Coste`.
+| 2026-06-07 | Electricidad | MEDIDA 1 (0,18) | 74042 | 74300 | 258 | kWh |
+| 2026-06-07 | Agua | Agua Potable METER-2-1 | 13593 | 13600 | 7 | m³ |
 
-## 2. Crear Apps Script
+## Actualizar Google Sheets
 
-1. Dentro de la hoja, ve a `Extensiones > Apps Script`.
-2. Borra el codigo inicial.
-3. Copia todo el contenido de `appscript.gs`.
-4. Pegalo en Apps Script.
-5. Guarda el proyecto.
+1. Abre tu Google Sheet.
+2. En la pestaña `Lecturas`, cambia la fila 1 por:
+   `Fecha`, `Categoria`, `Contador`, `Lectura Anterior`, `Lectura Actual`, `Consumo`, `Unidad`.
+3. Si tenías datos antiguos con columnas de coste/precio, guárdalos aparte antes de cambiar la estructura.
 
-## 3. Publicar Apps Script como Web App
+## Actualizar Apps Script
 
-1. Pulsa `Implementar > Nueva implementacion`.
-2. En tipo, elige `Aplicacion web`.
-3. Ejecutar como: `Yo`.
-4. Quien tiene acceso: `Cualquier usuario`.
-5. Pulsa `Implementar`.
-6. Autoriza permisos.
-7. Copia la URL que termina en `/exec`.
-
-## 4. Configurar la URL en la app
-
-1. Abre `app.js`.
-2. No hace falta escribir la URL dentro del codigo.
-3. Al abrir la web, pega la URL en el campo `URL de Google Apps Script`.
-4. Pulsa `Guardar configuracion`.
-
-La URL se guarda en el navegador del usuario.
-
-## 5. Subir a GitHub
-
-1. Crea un repositorio en GitHub.
-2. Sube estos archivos a la raiz del repositorio:
-   - `index.html`
-   - `style.css`
-   - `app.js`
-   - `appscript.gs`
-   - `README.md`
-3. Confirma los cambios.
-
-## 6. Activar GitHub Pages
-
-1. Entra en `Settings` del repositorio.
-2. Ve a `Pages`.
-3. En `Build and deployment`, selecciona:
-   - Source: `Deploy from a branch`
-   - Branch: `main`
-   - Folder: `/root`
+1. Abre la hoja de Google Sheets.
+2. Ve a `Extensiones > Apps Script`.
+3. Sustituye todo el código por el contenido de `appscript.gs`.
 4. Guarda.
-5. GitHub mostrara una URL tipo:
-   `https://usuario.github.io/nombre-repositorio/`
+5. Pulsa `Implementar > Gestionar implementaciones`.
+6. Edita la implementación web actual.
+7. Selecciona `Nueva versión`.
+8. Guarda/implementa.
 
-## 7. Acceder desde movil y ordenador
+La URL `/exec` puede seguir siendo la misma si actualizas la implementación existente. La app mantiene la URL configurable en pantalla.
 
-1. Abre la URL de GitHub Pages.
-2. Pega la URL de Apps Script si es la primera vez en ese dispositivo.
-3. Pulsa `Guardar configuracion`.
-4. Usa la aplicacion normalmente.
+## Publicar en GitHub Pages
+
+Sube o reemplaza en tu repositorio estos archivos:
+
+- `index.html`
+- `style.css`
+- `app.js`
+- `seedData.js`
+- `appscript.gs`
+- `README.md`
+- `lecturas_historicas_contadores.csv`
+
+Después GitHub Pages actualizará la web.
+
+## Usar la web
+
+1. Abre la web publicada en GitHub Pages.
+2. Pega la URL de Apps Script en `URL de Google Apps Script`.
+3. Pulsa `Guardar configuración`.
+4. Usa la pestaña `⚡ Contador eléctrico` para guardar las tres medidas eléctricas en una sola fecha.
+5. Usa la pestaña `💧 Contador de agua` para guardar agua potable y agua PCI en una sola fecha.
+
+## Añadir lecturas de fechas anteriores
+
+1. Selecciona primero la fecha antigua en el formulario.
+2. La web buscará automáticamente la última lectura anterior a esa fecha.
+3. Introduce las lecturas actuales y guarda.
+4. Apps Script reordenará las filas y recalculará los consumos posteriores del mismo contador.
+
+La lectura introducida no puede ser menor que la anterior ni mayor que una lectura posterior ya registrada.
+
+## Orden y gráficas
+
+- Las tablas muestran primero la lectura más reciente.
+- Cada pestaña permite elegir gráficas de barras, líneas o círculo con porcentajes.
+- En la vista circular, los porcentajes aparecen al colocar el cursor sobre cada sección.
+
+## Importar lecturas históricas
+
+Opción 1, desde la web:
+
+1. Configura la URL de Apps Script.
+2. Pulsa `Importar lecturas históricas`.
+3. Confirma el aviso.
+4. La web enviará las filas de `seedData.js` a Google Sheets.
+
+Opción 2, con CSV:
+
+1. Abre `lecturas_historicas_contadores.csv`.
+2. Copia las filas.
+3. Pégalas en Google Sheets bajo la fila de encabezados.
+
+## Evitar duplicados
+
+La web evita duplicados antes de enviar datos. Apps Script también evita duplicados en Google Sheets.
+
+Una fila se considera duplicada si coincide:
+
+- Fecha
+- Categoria
+- Contador
+- Lectura Actual
+
+Además, al pulsar `Guardar lectura`, el botón se desactiva y cambia a `Guardando...` hasta que termina la operación.
 
 ## Funciones incluidas
 
-- Lecturas de electricidad.
-- Lecturas de agua.
-- Lectura anterior automatica.
-- Consumo automatico.
-- Precio por kWh o m3 configurable.
-- Coste automatico.
-- Panel de consumo diario, mensual y anual.
-- Coste mensual y anual.
-- Ultima lectura registrada.
-- Graficas con Chart.js.
-- Busqueda por fechas.
-- Filtros por tipo, dia, mes y ano.
-- Exportacion CSV compatible con Excel.
-- Copia de seguridad automatica en Google Sheets, porque cada lectura queda guardada en la hoja.
-
-## Nota sobre permisos
-
-Si el navegador bloquea una peticion a Apps Script por permisos o CORS, vuelve a publicar la implementacion como Web App y verifica que el acceso sea `Cualquier usuario`.
+- Guardar en Google Sheets.
+- Leer datos desde Google Sheets.
+- Actualizar datos.
+- Exportar CSV con la nueva estructura.
+- Tema claro/oscuro.
+- URL de Apps Script configurable.
+- Pestañas separadas para electricidad y agua.
+- Gráficas compactas por día, mes y año.
+- Importación histórica desde `MEDIDA Contador (1).txt`.
