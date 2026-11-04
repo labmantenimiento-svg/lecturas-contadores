@@ -51,7 +51,7 @@
 
       <section class="workspace">
         <form id="electricForm" class="panel">
-          <div class="panel-head"><h2>Nueva lectura eléctrica</h2></div>
+          <div class="panel-head"><h2 id="electricFormTitle">Nueva lectura eléctrica</h2><p id="electricEditStatus" class="edit-status" hidden></p></div>
           <div class="field">
             <label for="electricDate">Fecha</label>
             <input id="electricDate" type="date" required>
@@ -76,9 +76,11 @@
               <label>Consumo automático<input id="electric088Use" type="number" readonly></label>
             </div>
           </div>
+          <p id="electricChronologyInfo" class="chronology-info" aria-live="polite"></p>
           <div class="total-line">Consumo total eléctrico: <strong id="electricTotal">0 kWh</strong></div>
           <div class="form-actions">
             <button id="saveElectricBtn" type="submit" class="primary">Guardar lectura</button>
+            <button id="cancelElectricEditBtn" type="button" class="cancel-edit" hidden>Cancelar edición</button>
             <button type="reset">Limpiar</button>
           </div>
         </form>
@@ -90,7 +92,7 @@
             <div class="field"><label for="electricTo">Hasta</label><input id="electricTo" type="date"></div>
             <div class="field"><label for="electricChartMode">Vista de gráficas</label><select id="electricChartMode"><option value="bar">Barras</option><option value="line">Líneas</option><option value="doughnut">Círculo y porcentajes</option></select></div>
           </div>
-          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Unidad</th></tr></thead><tbody id="electricBody"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Unidad</th><th>Acciones</th></tr></thead><tbody id="electricBody"></tbody></table></div>
         </section>
       </section>
 
@@ -113,7 +115,7 @@
 
       <section class="workspace">
         <form id="waterForm" class="panel">
-          <div class="panel-head"><h2>Nueva lectura de agua</h2></div>
+          <div class="panel-head"><h2 id="waterFormTitle">Nueva lectura de agua</h2><p id="waterEditStatus" class="edit-status" hidden></p></div>
           <div class="field">
             <label for="waterDate">Fecha</label>
             <input id="waterDate" type="date" required>
@@ -132,9 +134,11 @@
               <label>Consumo automático<input id="waterPciUse" type="number" readonly></label>
             </div>
           </div>
+          <p id="waterChronologyInfo" class="chronology-info" aria-live="polite"></p>
           <div class="total-line">Consumo total agua: <strong id="waterTotal">0 m³</strong></div>
           <div class="form-actions">
             <button id="saveWaterBtn" type="submit" class="primary">Guardar lectura</button>
+            <button id="cancelWaterEditBtn" type="button" class="cancel-edit" hidden>Cancelar edición</button>
             <button type="reset">Limpiar</button>
           </div>
         </form>
@@ -146,7 +150,7 @@
             <div class="field"><label for="waterTo">Hasta</label><input id="waterTo" type="date"></div>
             <div class="field"><label for="waterChartMode">Vista de gráficas</label><select id="waterChartMode"><option value="bar">Barras</option><option value="line">Líneas</option><option value="doughnut">Círculo y porcentajes</option></select></div>
           </div>
-          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Unidad</th></tr></thead><tbody id="waterBody"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Unidad</th><th>Acciones</th></tr></thead><tbody id="waterBody"></tbody></table></div>
         </section>
       </section>
 
@@ -162,3 +166,4 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
+
