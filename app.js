@@ -27,7 +27,8 @@ const state = {
   activeTab: "electric",
   readings: [],
   charts: {},
-  saving: false
+  saving: false,
+  editing: null
 };
 
 const els = {
@@ -68,7 +69,15 @@ const els = {
   waterMonthly: document.getElementById("waterMonthly"),
   waterAnnual: document.getElementById("waterAnnual"),
   lastPotable: document.getElementById("lastPotable"),
-  lastPci: document.getElementById("lastPci")
+  lastPci: document.getElementById("lastPci"),
+  electricFormTitle: document.getElementById("electricFormTitle"),
+  waterFormTitle: document.getElementById("waterFormTitle"),
+  electricEditStatus: document.getElementById("electricEditStatus"),
+  waterEditStatus: document.getElementById("waterEditStatus"),
+  electricChronologyInfo: document.getElementById("electricChronologyInfo"),
+  waterChronologyInfo: document.getElementById("waterChronologyInfo"),
+  cancelElectricEditBtn: document.getElementById("cancelElectricEditBtn"),
+  cancelWaterEditBtn: document.getElementById("cancelWaterEditBtn")
 };
 
 const fields = {
@@ -126,11 +135,25 @@ function bindEvents() {
   els.tabs.forEach(tab => tab.addEventListener("click", () => setTab(tab.dataset.tab)));
   els.electricForm.addEventListener("submit", event => saveCategory(event, "electric"));
   els.waterForm.addEventListener("submit", event => saveCategory(event, "water"));
-  els.electricForm.addEventListener("reset", () => setTimeout(() => resetForm("electric")));
-  els.waterForm.addEventListener("reset", () => setTimeout(() => resetForm("water")));
+  els.electricForm.addEventListener("reset", event => {
+    if (state.editing?.category === "electric") {
+      event.preventDefault();
+      cancelEdit();
+    } else setTimeout(() => resetForm("electric"));
+  });
+  els.waterForm.addEventListener("reset", event => {
+    if (state.editing?.category === "water") {
+      event.preventDefault();
+      cancelEdit();
+    } else setTimeout(() => resetForm("water"));
+  });
   [els.electricFrom, els.electricTo, els.electricChartMode, els.waterFrom, els.waterTo, els.waterChartMode].forEach(el => el.addEventListener("change", render));
   els.electricDate.addEventListener("change", () => fillPreviousReadings("electric"));
   els.waterDate.addEventListener("change", () => fillPreviousReadings("water"));
+  els.electricBody.addEventListener("click", handleTableAction);
+  els.waterBody.addEventListener("click", handleTableAction);
+  els.cancelElectricEditBtn.addEventListener("click", cancelEdit);
+  els.cancelWaterEditBtn.addEventListener("click", cancelEdit);
   for (const category of ["electric", "water"]) {
     for (const group of Object.values(fields[category])) {
       if (group.current) group.current.addEventListener("input", () => calculateCategory(category));
@@ -139,6 +162,7 @@ function bindEvents() {
 }
 
 function setTab(tab) {
+  if (state.editing && state.editing.category !== tab) cancelEdit();
   state.activeTab = tab;
   els.tabs.forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
   els.electricView.classList.toggle("active", tab === "electric");
@@ -156,20 +180,25 @@ async function loadData() {
   if (!state.apiUrl) {
     setStatus("Configura la URL de Apps Script");
     render();
-    return;
+    return false;
   }
   try {
     setStatus("Cargando datos...");
     const response = await fetch(`${state.apiUrl}?action=list`);
+    if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
     const json = await response.json();
     if (!json.ok) throw new Error(json.error || "Respuesta no válida");
     state.readings = normalizeRows(json.data || []);
     setStatus("Datos sincronizados con Google Sheets");
+    fillPreviousReadings();
+    render();
+    return true;
   } catch (error) {
     setStatus(`Error: ${error.message}`);
+    fillPreviousReadings();
+    render();
+    return false;
   }
-  fillPreviousReadings();
-  render();
 }
 
 async function saveCategory(event, category) {
@@ -181,29 +210,46 @@ async function saveCategory(event, category) {
   }
 
   const button = category === "electric" ? els.saveElectricBtn : els.saveWaterBtn;
-  const originalText = button.textContent;
   state.saving = true;
   button.disabled = true;
   button.textContent = "Guardando...";
 
   try {
+    if (state.editing) {
+      const row = buildEditedRow(category);
+      validateCandidate(row, state.editing.original);
+      const result = await postRows({
+        action: "updateReading",
+        original: identityOf(state.editing.original),
+        row
+      });
+      state.editing = null;
+      unlockForms();
+      resetForm(category);
+      const synced = await loadData();
+      showToast(synced
+        ? `✅ Lectura de ${row.Contador} del ${formatDate(row.Fecha)} corregida`
+        : "Guardado en Sheets, pero no se pudo actualizar la vista. Pulsa Actualizar.", synced ? "ok" : "error");
+      return result;
+    }
+
     const rows = buildRowsFromForm(category);
     const freshRows = removeExistingRows(rows);
     if (!freshRows.length) {
-      showToast("✅ Esa lectura ya existe, no se duplicó", "ok");
+      showToast("✅ Esas lecturas ya existen, no se duplicaron", "ok");
       return;
     }
-    await postRows(freshRows, "saveBatch");
-    showToast("✅ Lectura guardada correctamente", "ok");
+    await postRows({ action: "saveBatch", rows: freshRows });
     resetForm(category);
-    await loadData();
+    const synced = await loadData();
+    showToast(synced ? "✅ Lecturas guardadas correctamente" : "Guardado en Sheets, pero no se pudo actualizar la vista. Pulsa Actualizar.", synced ? "ok" : "error");
   } catch (error) {
     setStatus(`Error: ${error.message}`);
-    showToast("❌ Error al guardar la lectura", "error");
+    showToast(`❌ ${error.message}`, "error");
   } finally {
     state.saving = false;
     button.disabled = false;
-    button.textContent = originalText;
+    button.textContent = state.editing ? "Guardar cambios" : "Guardar lectura";
   }
 }
 
@@ -222,24 +268,27 @@ async function importHistoricalReadings() {
       showToast("✅ Las lecturas históricas ya estaban importadas", "ok");
       return;
     }
-    const result = await postRows(rows, "importBatch");
-    showToast(`✅ Importadas ${result.inserted || rows.length} lecturas históricas`, "ok");
-    await loadData();
+    const result = await postRows({ action: "importBatch", rows });
+    const synced = await loadData();
+    showToast(synced
+      ? `✅ Importadas ${result.inserted || rows.length} lecturas históricas`
+      : "Importación guardada en Sheets, pero no se pudo actualizar la vista. Pulsa Actualizar.", synced ? "ok" : "error");
   } catch (error) {
     setStatus(`Error: ${error.message}`);
-    showToast("❌ Error al importar lecturas históricas", "error");
+    showToast(`❌ ${error.message}`, "error");
   } finally {
     els.importHistoryBtn.disabled = false;
     els.importHistoryBtn.textContent = "Importar lecturas históricas";
   }
 }
 
-async function postRows(rows, action) {
+async function postRows(payload) {
   const response = await fetch(state.apiUrl, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action, rows })
+    body: JSON.stringify(payload)
   });
+  if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
   const json = await response.json();
   if (!json.ok) throw new Error(json.error || "No se pudo guardar");
   return json;
@@ -249,43 +298,105 @@ function buildRowsFromForm(category) {
   calculateCategory(category);
   const config = CATEGORIES[category];
   const date = category === "electric" ? els.electricDate.value : els.waterDate.value;
+  validateDate(date);
   const rows = config.counters.map(counter => {
     const group = fields[category][counter.name];
+    const current = readRequiredNumber(group.current.value, counter.name);
     return {
       Fecha: date,
       Categoria: config.label,
       Contador: counter.name,
       "Lectura Anterior": numberValue(group.previous.value),
-      "Lectura Actual": numberValue(group.current.value),
-      Consumo: numberValue(group.consumption.value),
+      "Lectura Actual": current,
+      Consumo: current - numberValue(group.previous.value),
       Unidad: config.unit
     };
   });
-  validateChronology(rows);
+  rows.forEach(row => validateCandidate(row));
   return rows;
 }
 
-function validateChronology(rows) {
-  rows.forEach(row => {
-    const previous = numberValue(row["Lectura Anterior"]);
-    const current = numberValue(row["Lectura Actual"]);
-    if (current < previous) {
-      throw new Error(`${row.Contador}: la lectura actual es menor que la anterior`);
-    }
-    const next = nextForCounter(row.Contador, row.Fecha);
-    if (next && current > next["Lectura Actual"]) {
-      throw new Error(`${row.Contador}: la lectura supera la lectura posterior del ${formatDate(next.Fecha)}`);
-    }
-  });
+function buildEditedRow(category) {
+  if (!state.editing || state.editing.category !== category) throw new Error("No hay una lectura seleccionada para editar");
+  const { original } = state.editing;
+  const counter = CATEGORIES[category].counters.find(item => item.name === original.Contador);
+  if (!counter) throw new Error("El contador seleccionado no corresponde a esta categoría");
+  const date = category === "electric" ? els.electricDate.value : els.waterDate.value;
+  validateDate(date);
+  const group = fields[category][counter.name];
+  const current = readRequiredNumber(group.current.value, counter.name);
+  const previous = previousForCounter(counter.name, date, original);
+  return {
+    Fecha: date,
+    Categoria: CATEGORIES[category].label,
+    Contador: counter.name,
+    "Lectura Anterior": previous ? numberValue(previous["Lectura Actual"]) : current,
+    "Lectura Actual": current,
+    Consumo: previous ? current - numberValue(previous["Lectura Actual"]) : 0,
+    Unidad: CATEGORIES[category].unit
+  };
+}
+
+function validateCandidate(row, excluded = null) {
+  validateDate(row.Fecha);
+  const current = readRequiredNumber(row["Lectura Actual"], row.Contador);
+  const duplicate = state.readings.find(item => sameIdentity(item, row) && !sameIdentity(item, excluded));
+  if (duplicate) {
+    if (!excluded && numberValue(duplicate["Lectura Actual"]) === current) return;
+    throw new Error(`${row.Contador}: ya existe una lectura para el ${formatDate(row.Fecha)}; selecciónala en el histórico para editarla`);
+  }
+  const previous = previousForCounter(row.Contador, row.Fecha, excluded);
+  const next = nextForCounter(row.Contador, row.Fecha, excluded);
+  if (previous && current < numberValue(previous["Lectura Actual"])) {
+    throw new Error(`${row.Contador}: ${fmt(current)} es inferior a la lectura anterior del ${formatDate(previous.Fecha)} (${fmt(previous["Lectura Actual"])}).`);
+  }
+  if (next && current > numberValue(next["Lectura Actual"])) {
+    throw new Error(`${row.Contador}: ${fmt(current)} supera la lectura posterior del ${formatDate(next.Fecha)} (${fmt(next["Lectura Actual"])}).`);
+  }
 }
 
 function removeExistingRows(rows) {
-  const existing = new Set(state.readings.map(rowKey));
-  return rows.filter(row => !existing.has(rowKey(row)));
+  const existing = new Map();
+  state.readings.forEach(row => existing.set(identityKey(row), (existing.get(identityKey(row)) || []).concat(row)));
+  const fresh = [];
+  for (const row of rows) {
+    const matches = existing.get(identityKey(row)) || [];
+    if (matches.length > 1) throw new Error(`${row.Contador}: hay varias filas para el ${formatDate(row.Fecha)}. Revísalas antes de guardar.`);
+    const current = matches[0];
+    if (!current) {
+      fresh.push(row);
+      continue;
+    }
+    if (numberValue(current["Lectura Actual"]) !== numberValue(row["Lectura Actual"])) {
+      throw new Error(`${row.Contador}: ya hay una lectura distinta el ${formatDate(row.Fecha)}. Usa Editar en la tabla para corregirla.`);
+    }
+  }
+  return fresh;
 }
 
-function rowKey(row) {
-  return `${row.Fecha}|${row.Categoria}|${row.Contador}|${numberValue(row["Lectura Actual"])}`;
+function identityKey(row) {
+  return `${row.Fecha}|${row.Categoria}|${row.Contador}`;
+}
+
+function identityOf(row) {
+  return { Fecha: row.Fecha, Categoria: row.Categoria, Contador: row.Contador };
+}
+
+function sameIdentity(a, b) {
+  return Boolean(a && b && identityKey(a) === identityKey(b));
+}
+
+function validateDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) throw new Error("Selecciona una fecha válida con formato AAAA-MM-DD.");
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw new Error("La fecha seleccionada no existe.");
+}
+
+function readRequiredNumber(value, counter) {
+  if (String(value ?? "").trim() === "") throw new Error(`${counter}: introduce una lectura actual.`);
+  const number = Number(String(value).replace(",", "."));
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${counter}: la lectura debe ser un número finito igual o superior a cero.`);
+  return number;
 }
 
 function normalizeRows(rows) {
@@ -305,10 +416,14 @@ function fillPreviousReadings(onlyCategory = null) {
   for (const category of categories) {
     const selectedDate = category === "electric" ? els.electricDate.value : els.waterDate.value;
     for (const counter of CATEGORIES[category].counters) {
-      const last = latestForCounter(counter.name, selectedDate);
+      const excluded = state.editing?.category === category && state.editing.original.Contador === counter.name
+        ? state.editing.original
+        : null;
+      const last = previousForCounter(counter.name, selectedDate, excluded);
       fields[category][counter.name].previous.value = last ? last["Lectura Actual"] : 0;
     }
     calculateCategory(category);
+    updateChronologyInfo(category, selectedDate);
   }
 }
 
@@ -326,10 +441,13 @@ function calculateCategory(category) {
 }
 
 function resetForm(category) {
-  const form = category === "electric" ? els.electricForm : els.waterForm;
-  form.reset();
+  for (const counter of CATEGORIES[category].counters) fields[category][counter.name].current.value = "";
   const dateInput = category === "electric" ? els.electricDate : els.waterDate;
   dateInput.valueAsDate = new Date();
+  if (state.editing?.category === category) {
+    state.editing = null;
+    unlockForms();
+  }
   fillPreviousReadings();
 }
 
@@ -382,14 +500,19 @@ function renderTables() {
 }
 
 function renderRow(row) {
+  const key = encodeURIComponent(identityKey(row));
+  const duplicates = state.readings.filter(item => sameIdentity(item, row)).length > 1;
   return `
     <tr>
       <td>${formatDate(row.Fecha)}</td>
-      <td>${row.Contador}</td>
+      <td>${escapeHtml(row.Contador)}</td>
       <td>${fmt(row["Lectura Anterior"])}</td>
       <td>${fmt(row["Lectura Actual"])}</td>
       <td>${fmt(row.Consumo)}</td>
-      <td>${row.Unidad}</td>
+      <td>${escapeHtml(row.Unidad)}</td>
+      <td class="actions-cell">${duplicates
+        ? '<button type="button" disabled title="Hay más de una fila para este contador y fecha">Duplicado</button>'
+        : `<button type="button" data-edit-key="${key}">Editar</button>`}</td>
     </tr>
   `;
 }
@@ -497,11 +620,110 @@ function latestForCounter(counter, beforeDate = "") {
     .at(-1);
 }
 
-function nextForCounter(counter, afterDate) {
+function previousForCounter(counter, beforeDate, excluded = null) {
   return state.readings
-    .filter(row => row.Contador === counter && row.Fecha > afterDate)
+    .filter(row => row.Contador === counter && row.Fecha < beforeDate && !sameIdentity(row, excluded))
+    .sort((a, b) => a.Fecha.localeCompare(b.Fecha))
+    .at(-1);
+}
+
+function nextForCounter(counter, afterDate, excluded = null) {
+  return state.readings
+    .filter(row => row.Contador === counter && row.Fecha > afterDate && !sameIdentity(row, excluded))
     .sort((a, b) => a.Fecha.localeCompare(b.Fecha))
     .at(0);
+}
+
+function updateChronologyInfo(category, date) {
+  const excluded = state.editing?.category === category ? state.editing.original : null;
+  const lines = CATEGORIES[category].counters.map(counter => {
+    const previous = previousForCounter(counter.name, date, excluded);
+    const next = nextForCounter(counter.name, date, excluded);
+    const beforeText = previous
+      ? `anterior ${fmt(previous["Lectura Actual"])} (${formatDate(previous.Fecha)})`
+      : "sin lectura anterior";
+    const afterText = next
+      ? `posterior ${fmt(next["Lectura Actual"])} (${formatDate(next.Fecha)})`
+      : "sin lectura posterior";
+    return `${counter.name}: ${beforeText} · ${afterText}`;
+  });
+  const element = category === "electric" ? els.electricChronologyInfo : els.waterChronologyInfo;
+  element.textContent = lines.join("\n");
+}
+
+function handleTableAction(event) {
+  const button = event.target.closest("[data-edit-key]");
+  if (!button) return;
+  const key = decodeURIComponent(button.dataset.editKey);
+  const row = state.readings.find(item => identityKey(item) === key);
+  if (!row) {
+    showToast("❌ La lectura ya no está cargada. Actualiza los datos e inténtalo de nuevo.", "error");
+    return;
+  }
+  if (state.readings.filter(item => sameIdentity(item, row)).length !== 1) {
+    showToast("❌ Hay varias filas para ese contador y fecha. Deben revisarse antes de editar.", "error");
+    return;
+  }
+  if (state.editing && !confirm("Cancelar la edición actual y seleccionar otra lectura?")) return;
+  beginEdit(row);
+}
+
+function beginEdit(row) {
+  const category = row.Categoria === "Electricidad" ? "electric" : row.Categoria === "Agua" ? "water" : null;
+  if (!category || !CATEGORIES[category].counters.some(counter => counter.name === row.Contador)) {
+    showToast("❌ La categoría o el contador de esta fila no son válidos.", "error");
+    return;
+  }
+  setTab(category);
+  state.editing = { original: { ...row }, category };
+  const dateInput = category === "electric" ? els.electricDate : els.waterDate;
+  dateInput.value = row.Fecha;
+  for (const counter of CATEGORIES[category].counters) {
+    const input = fields[category][counter.name].current;
+    input.disabled = counter.name !== row.Contador;
+    input.value = counter.name === row.Contador ? row["Lectura Actual"] : "";
+  }
+  const status = category === "electric" ? els.electricEditStatus : els.waterEditStatus;
+  const title = category === "electric" ? els.electricFormTitle : els.waterFormTitle;
+  const cancel = category === "electric" ? els.cancelElectricEditBtn : els.cancelWaterEditBtn;
+  const save = category === "electric" ? els.saveElectricBtn : els.saveWaterBtn;
+  status.textContent = `Editando ${row.Contador} · ${formatDate(row.Fecha)}`;
+  status.hidden = false;
+  title.textContent = `Editar lectura: ${row.Contador}`;
+  cancel.hidden = false;
+  save.textContent = "Guardar cambios";
+  fillPreviousReadings(category);
+  const currentInput = fields[category][row.Contador].current;
+  currentInput.focus();
+}
+
+function cancelEdit() {
+  const category = state.editing?.category;
+  if (!category) return;
+  state.editing = null;
+  unlockForms();
+  resetForm(category);
+  showToast("Edición cancelada", "ok");
+}
+
+function unlockForms() {
+  for (const category of ["electric", "water"]) {
+    for (const counter of CATEGORIES[category].counters) fields[category][counter.name].current.disabled = false;
+  }
+  els.electricFormTitle.textContent = "Nueva lectura eléctrica";
+  els.waterFormTitle.textContent = "Nueva lectura de agua";
+  els.electricEditStatus.hidden = true;
+  els.waterEditStatus.hidden = true;
+  els.cancelElectricEditBtn.hidden = true;
+  els.cancelWaterEditBtn.hidden = true;
+  els.saveElectricBtn.textContent = "Guardar lectura";
+  els.saveWaterBtn.textContent = "Guardar lectura";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[char]);
 }
 
 function fmtLatest(counter) {
@@ -577,3 +799,4 @@ function showToast(message, type) {
 }
 
 init();
+
