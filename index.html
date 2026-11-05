@@ -18,6 +18,7 @@
     <div class="top-actions">
       <button id="themeToggle" type="button" title="Cambiar tema">◐</button>
       <button id="refreshBtn" type="button">Actualizar</button>
+      <button id="repairSearchBtn" type="button" class="primary">BUSCAR / REPARAR LECTURAS</button>
       <button id="importHistoryBtn" type="button">Importar lecturas históricas</button>
       <button id="exportCsvBtn" type="button">Exportar CSV</button>
     </div>
@@ -31,6 +32,44 @@
       </div>
       <button id="saveConfigBtn" type="button" class="primary">Guardar configuración</button>
       <span id="status" class="status">Sin conectar</span>
+    </section>
+
+    <section id="repairPanel" class="panel repair-panel" hidden aria-labelledby="repairTitle">
+      <div class="panel-head repair-head">
+        <div><h2 id="repairTitle">Buscar / reparar lecturas</h2><p>Los resultados se cargan desde Google Sheets. Las reparaciones solo se guardan después de revisar y confirmar la vista previa.</p></div>
+        <button id="closeRepairBtn" type="button">Cerrar</button>
+      </div>
+      <div class="repair-filters">
+        <div class="field"><label for="repairCategory">Categoría</label><select id="repairCategory"><option value="">Todas</option><option value="Electricidad">Electricidad</option><option value="Agua">Agua</option></select></div>
+        <div class="field"><label for="repairCounter">Contador</label><select id="repairCounter"><option value="">Todos</option></select></div>
+        <div class="field"><label for="repairFrom">Fecha inicial</label><input id="repairFrom" type="date"></div>
+        <div class="field"><label for="repairTo">Fecha final</label><input id="repairTo" type="date"></div>
+        <div class="field"><label for="repairYear">Año</label><input id="repairYear" type="number" min="2000" max="2100" placeholder="Todos"></div>
+        <div class="field"><label for="repairMonth">Mes</label><select id="repairMonth"><option value="">Todos</option><option value="01">Enero</option><option value="02">Febrero</option><option value="03">Marzo</option><option value="04">Abril</option><option value="05">Mayo</option><option value="06">Junio</option><option value="07">Julio</option><option value="08">Agosto</option><option value="09">Septiembre</option><option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option></select></div>
+      </div>
+      <label class="repair-toggle"><input id="repairSuspiciousOnly" type="checkbox"> Mostrar solo lecturas sospechosas</label>
+      <p id="repairSearchStatus" class="status" aria-live="polite"></p>
+      <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>Contador</th><th>Anterior</th><th>Actual</th><th>Consumo</th><th>Observación</th><th>Acción</th></tr></thead><tbody id="repairResults"></tbody></table></div>
+
+      <section class="repair-queue" aria-labelledby="repairQueueTitle">
+        <h3 id="repairQueueTitle">Reparaciones preparadas</h3>
+        <p>Incluye en el mismo lote las filas consecutivas que necesiten corrección. La secuencia debe quedar coherente antes de confirmar.</p>
+        <div class="table-wrap"><table><thead><tr><th>Fecha original</th><th>Contador</th><th>Lectura original</th><th>Nueva fecha</th><th>Lectura corregida</th><th></th></tr></thead><tbody id="repairQueue"></tbody></table></div>
+        <div class="form-actions repair-actions">
+          <button id="previewRepairBtn" type="button" class="primary">Revisar reparación</button>
+          <button id="clearRepairBtn" type="button">Cancelar y vaciar</button>
+        </div>
+      </section>
+
+      <section id="repairPreview" class="repair-preview" hidden aria-labelledby="repairPreviewTitle">
+        <h3 id="repairPreviewTitle">Vista previa de la reparación</h3>
+        <div id="repairPreviewDetails" aria-live="polite"></div>
+        <div id="repairPreviewIssues" class="repair-issues" role="alert"></div>
+        <div class="form-actions repair-actions">
+          <button id="cancelRepairPreviewBtn" type="button">Cancelar</button>
+          <button id="confirmRepairBtn" type="button" class="primary" disabled>Confirmar reparación</button>
+        </div>
+      </section>
     </section>
 
     <nav class="main-tabs" aria-label="Pestañas de contadores">

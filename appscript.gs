@@ -31,6 +31,10 @@ function doPost(e) {
     let result;
     if (action === 'updateReading') {
       result = updateReading_(sheet, body.original, body.row);
+    } else if (action === 'previewRepair') {
+      result = previewRepair_(sheet, body.changes);
+    } else if (action === 'repairReadings') {
+      result = repairReadings_(sheet, body.changes, body.expectedSignature, body.confirmed === true);
     } else if (action === 'saveBatch' || action === 'importBatch') {
       const rows = Array.isArray(body.rows) ? body.rows : [body];
       result = appendUniqueRows_(sheet, rows);
@@ -148,6 +152,226 @@ function updateReading_(sheet, originalInput, replacementInput) {
   return { updated: 1 };
 }
 
+function previewRepair_(sheet, inputChanges) {
+  const plan = buildRepairPlan_(sheet, inputChanges);
+  return {
+    canConfirm: plan.issues.length === 0,
+    issues: plan.issues,
+    original: plan.original,
+    corrected: plan.corrected,
+    previous: plan.previous,
+    next: plan.next,
+    affected: plan.affected,
+    affectedCount: plan.affected.length,
+    signature: plan.signature
+  };
+}
+
+function repairReadings_(sheet, inputChanges, expectedSignature, confirmed) {
+  if (!confirmed) throw new Error('La reparación requiere confirmación explícita después de revisar la vista previa.');
+  const plan = buildRepairPlan_(sheet, inputChanges);
+  if (!expectedSignature || plan.signature !== expectedSignature) {
+    throw new Error('Google Sheets cambió desde la vista previa. No se modificó nada; actualiza los datos y revisa otra vez.');
+  }
+  if (plan.issues.length) throw new Error(`La secuencia sigue siendo inconsistente; no se modificó la hoja. ${plan.issues.join(' ')}`);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let backup = null;
+  if (plan.affectedCount > 1) backup = createRepairBackup_(ss);
+  const audit = getAuditSheet_(ss);
+  const auditWasCreated = audit.created;
+  const auditSheet = audit.sheet;
+  const auditStart = auditSheet.getLastRow() + 1;
+  const auditRows = createAuditRows_(plan);
+
+  try {
+    writeChangesSafely_(sheet, plan.records, plan.counters, [], new Set(plan.affected.map(change => change.sheetRow)));
+    auditSheet.getRange(auditStart, 1, auditRows.length, REPAIR_AUDIT_HEADERS.length).setValues(auditRows);
+    SpreadsheetApp.flush();
+    const savedAudit = auditSheet.getRange(auditStart, 1, auditRows.length, REPAIR_AUDIT_HEADERS.length).getValues();
+    if (savedAudit.length !== auditRows.length || savedAudit.some((row, index) => JSON.stringify(row) !== JSON.stringify(auditRows[index]))) {
+      throw new Error('No se pudo verificar el registro de auditoría.');
+    }
+  } catch (error) {
+    const rollbackErrors = [];
+    try {
+      plan.snapshots.forEach(snapshot => sheet.getRange(snapshot.sheetRow, 1, 1, HEADERS.length).setValues([snapshot.values]));
+      if (auditSheet.getLastRow() >= auditStart) auditSheet.getRange(auditStart, 1, auditRows.length, REPAIR_AUDIT_HEADERS.length).clearContent();
+      SpreadsheetApp.flush();
+      plan.snapshots.forEach(snapshot => {
+        const restored = sheet.getRange(snapshot.sheetRow, 1, 1, HEADERS.length).getValues()[0];
+        if (JSON.stringify(restored) !== JSON.stringify(snapshot.values)) throw new Error(`No se verificó la restauración de la fila ${snapshot.sheetRow}.`);
+      });
+      if (auditWasCreated && auditSheet.getLastRow() <= 1) ss.deleteSheet(auditSheet);
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError.message || String(rollbackError));
+    }
+    if (rollbackErrors.length) throw new Error(`Falló la reparación y la restauración también dio error. Detalle: ${rollbackErrors.join('; ')}`);
+    throw new Error(`No se guardó la reparación; las filas originales se restauraron. ${error.message || error}`);
+  }
+
+  return { repaired: plan.changes.length, affected: plan.affectedCount, backup: backup && { id: backup.getId(), name: backup.getName() } };
+}
+
+const REPAIR_AUDIT_HEADERS = [
+  'Fecha registro', 'Lote', 'Fecha lectura original', 'Fecha lectura corregida', 'Categoría', 'Contador',
+  'Lectura actual original', 'Lectura actual corregida',
+  'Lectura anterior original', 'Lectura anterior recalculada',
+  'Consumo original', 'Consumo recalculado'
+];
+
+function buildRepairPlan_(sheet, inputChanges) {
+  if (!Array.isArray(inputChanges) || !inputChanges.length) throw new Error('Selecciona al menos una lectura para reparar.');
+  if (inputChanges.length > 100) throw new Error('Repara como máximo 100 lecturas en cada operación.');
+  const sourceRecords = readRecords_(sheet);
+  const originalBySheetRow = new Map(sourceRecords.map(record => [record.sheetRow, record.row]));
+  const records = sourceRecords.map(record => ({ row: Object.assign({}, record.row), sheetRow: record.sheetRow }));
+  const originals = [];
+  const corrected = [];
+  const targets = [];
+  const counters = new Set();
+  const seenOriginals = new Set();
+
+  inputChanges.forEach(change => {
+    const original = normalizeIdentity_(change && change.original);
+    const replacement = normalizeInput_(change && change.row);
+    validateIdentity_(original);
+    validateRow_(replacement);
+    if (replacement.Categoria !== original.Categoria || replacement.Contador !== original.Contador) {
+      throw new Error('La reparación debe conservar la categoría y el contador originales.');
+    }
+    const originalKey = identityKey_(original);
+    if (seenOriginals.has(originalKey)) throw new Error(`${original.Contador}: la reparación contiene varias correcciones para la misma fila.`);
+    seenOriginals.add(originalKey);
+    const matches = records.filter(record => identityKey_(record.row) === originalKey);
+    if (matches.length !== 1) throw new Error(matches.length
+      ? `${original.Contador}: hay varias filas para el ${formatDate_(original.Fecha)}. No se modificó nada; revisa los duplicados.`
+      : `No se encontró la lectura original del ${formatDate_(original.Fecha)}.`);
+    const target = matches[0];
+    const expected = Number(change.original['Lectura Actual'] ?? change.original.lecturaActual);
+    if (!Number.isFinite(expected) || target.row['Lectura Actual'] !== expected) {
+      throw new Error(`${original.Contador}: la lectura cambió desde que se abrió; actualiza los datos antes de reparar.`);
+    }
+    originals.push({ ...target.row });
+    target.row = replacement;
+    corrected.push({ ...replacement });
+    targets.push(target);
+    counters.add(replacement.Contador);
+  });
+
+  const issues = [];
+  const affected = [];
+  const previous = [];
+  const next = [];
+  counters.forEach(counter => {
+    const rows = records.filter(record => record.row.Contador === counter).sort((a, b) => a.row.Fecha.localeCompare(b.row.Fecha));
+    let prior = null;
+    rows.forEach(record => {
+      const row = record.row;
+      try { validateStoredReading_(row); }
+      catch (error) { issues.push(error.message); }
+      if (prior && prior.Fecha === row.Fecha) {
+        issues.push(`${counter}: hay varias lecturas para el ${formatDate_(row.Fecha)}.`);
+      }
+      const current = row['Lectura Actual'];
+      if (prior && current < prior['Lectura Actual']) {
+        issues.push(`${counter}: ${formatDate_(row.Fecha)} (${current}) queda por debajo de ${formatDate_(prior.Fecha)} (${prior['Lectura Actual']}). Corrige también esa lectura en este lote.`);
+      }
+      const old = originalBySheetRow.get(record.sheetRow);
+      row['Lectura Anterior'] = prior ? prior['Lectura Actual'] : current;
+      row.Consumo = prior ? current - prior['Lectura Actual'] : 0;
+      if (!old || old.Fecha !== row.Fecha || old['Lectura Actual'] !== row['Lectura Actual'] || old['Lectura Anterior'] !== row['Lectura Anterior'] || old.Consumo !== row.Consumo) {
+        affected.push({
+          sheetRow: record.sheetRow, Fecha: row.Fecha, FechaOriginal: old && old.Fecha, Categoria: row.Categoria, Contador: row.Contador,
+          original: old ? old['Lectura Actual'] : null,
+          corrected: row['Lectura Actual'],
+          previousOriginal: old ? old['Lectura Anterior'] : null,
+          previous: row['Lectura Anterior'],
+          consumptionOriginal: old ? old.Consumo : null,
+          consumption: row.Consumo
+        });
+      }
+      prior = row;
+    });
+  });
+
+  targets.forEach(target => {
+    const rows = records.filter(record => record.row.Contador === target.row.Contador).sort((a, b) => a.row.Fecha.localeCompare(b.row.Fecha));
+    const index = rows.indexOf(target);
+    previous.push(index > 0 ? rows[index - 1].row : null);
+    next.push(index + 1 < rows.length ? rows[index + 1].row : null);
+  });
+  if (!affected.length) issues.push('La reparación no cambia ningún dato.');
+
+  const affectedRows = new Set(affected.map(change => change.sheetRow));
+  const snapshots = records.filter(record => record.sheetRow && affectedRows.has(record.sheetRow)).map(record => ({
+    sheetRow: record.sheetRow,
+    values: sheet.getRange(record.sheetRow, 1, 1, HEADERS.length).getValues()[0]
+  }));
+  const signatureRows = sourceRecords.filter(record => counters.has(record.row.Contador))
+    .sort((a, b) => a.row.Contador.localeCompare(b.row.Contador) || a.row.Fecha.localeCompare(b.row.Fecha) || a.sheetRow - b.sheetRow)
+    .map(record => [record.sheetRow, ...HEADERS.map(header => record.row[header])]);
+  return {
+    changes: inputChanges,
+    records,
+    counters: [...counters],
+    original: originals,
+    corrected,
+    previous: previous.map(row => row && ({ Fecha: row.Fecha, 'Lectura Actual': row['Lectura Actual'] })),
+    next: next.map(row => row && ({ Fecha: row.Fecha, 'Lectura Actual': row['Lectura Actual'] })),
+    affected,
+    affectedCount: affected.length,
+    issues: [...new Set(issues)],
+    signature: JSON.stringify(signatureRows),
+    snapshots
+  };
+}
+
+function getAuditSheet_(ss) {
+  let sheet = ss.getSheetByName('Registro de reparaciones');
+  let created = false;
+  if (!sheet) {
+    sheet = ss.insertSheet('Registro de reparaciones');
+    sheet.getRange(1, 1, 1, REPAIR_AUDIT_HEADERS.length).setValues([REPAIR_AUDIT_HEADERS]);
+    sheet.setFrozenRows(1);
+    created = true;
+  } else {
+    const headers = sheet.getRange(1, 1, 1, REPAIR_AUDIT_HEADERS.length).getValues()[0];
+    if (!REPAIR_AUDIT_HEADERS.every((header, index) => headers[index] === header)) {
+      throw new Error('La hoja Registro de reparaciones existe con encabezados distintos; no se modificó nada.');
+    }
+  }
+  return { sheet, created };
+}
+
+function createRepairBackup_(ss) {
+  const file = DriveApp.getFileById(ss.getId());
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
+  const copy = file.makeCopy(`${ss.getName()} - copia previa a reparación ${stamp}`);
+  if (!copy || !copy.getId() || copy.getMimeType() !== MimeType.GOOGLE_SHEETS) {
+    throw new Error('No se pudo verificar la copia de seguridad del Spreadsheet. La reparación se canceló.');
+  }
+  return copy;
+}
+
+function authorizeRepairDrive() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('No se ha encontrado la hoja de cálculo vinculada al Apps Script.');
+  const mimeType = DriveApp.getFileById(ss.getId()).getMimeType();
+  if (mimeType !== MimeType.GOOGLE_SHEETS) throw new Error('El proyecto no está vinculado a un Google Sheet.');
+  return 'Acceso de lectura a Drive confirmado para crear copias de seguridad antes de reparaciones de varias filas.';
+}
+
+function createAuditRows_(plan) {
+  const batchId = Utilities.getUuid();
+  const timestamp = new Date();
+  return plan.affected.map(change => [
+    timestamp, batchId, change.FechaOriginal || change.Fecha, change.Fecha, change.Categoria, change.Contador,
+    change.original, change.corrected, change.previousOriginal, change.previous,
+    change.consumptionOriginal, change.consumption
+  ]);
+}
+
 function recalculateCounter_(records, counter) {
   const rows = records.filter(record => record.row.Contador === counter).sort((a, b) => a.row.Fecha.localeCompare(b.row.Fecha));
   let previous = null;
@@ -167,8 +391,8 @@ function recalculateCounter_(records, counter) {
   });
 }
 
-function writeChangesSafely_(sheet, records, counters, added) {
-  const updates = records.filter(record => record.sheetRow && counters.includes(record.row.Contador));
+function writeChangesSafely_(sheet, records, counters, added, onlySheetRows = null) {
+  const updates = records.filter(record => record.sheetRow && counters.includes(record.row.Contador) && (!onlySheetRows || onlySheetRows.has(record.sheetRow)));
   const snapshots = updates.map(record => ({
     sheetRow: record.sheetRow,
     values: sheet.getRange(record.sheetRow, 1, 1, HEADERS.length).getValues()[0]
