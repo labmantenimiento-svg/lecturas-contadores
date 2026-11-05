@@ -28,7 +28,10 @@ const state = {
   readings: [],
   charts: {},
   saving: false,
-  editing: null
+  editing: null,
+  repairQueue: [],
+  repairPreview: null,
+  readingsSynced: false
 };
 
 const els = {
@@ -36,6 +39,26 @@ const els = {
   saveConfigBtn: document.getElementById("saveConfigBtn"),
   status: document.getElementById("status"),
   refreshBtn: document.getElementById("refreshBtn"),
+  repairSearchBtn: document.getElementById("repairSearchBtn"),
+  repairPanel: document.getElementById("repairPanel"),
+  closeRepairBtn: document.getElementById("closeRepairBtn"),
+  repairCategory: document.getElementById("repairCategory"),
+  repairCounter: document.getElementById("repairCounter"),
+  repairFrom: document.getElementById("repairFrom"),
+  repairTo: document.getElementById("repairTo"),
+  repairYear: document.getElementById("repairYear"),
+  repairMonth: document.getElementById("repairMonth"),
+  repairSuspiciousOnly: document.getElementById("repairSuspiciousOnly"),
+  repairSearchStatus: document.getElementById("repairSearchStatus"),
+  repairResults: document.getElementById("repairResults"),
+  repairQueue: document.getElementById("repairQueue"),
+  previewRepairBtn: document.getElementById("previewRepairBtn"),
+  clearRepairBtn: document.getElementById("clearRepairBtn"),
+  repairPreview: document.getElementById("repairPreview"),
+  repairPreviewDetails: document.getElementById("repairPreviewDetails"),
+  repairPreviewIssues: document.getElementById("repairPreviewIssues"),
+  cancelRepairPreviewBtn: document.getElementById("cancelRepairPreviewBtn"),
+  confirmRepairBtn: document.getElementById("confirmRepairBtn"),
   importHistoryBtn: document.getElementById("importHistoryBtn"),
   exportCsvBtn: document.getElementById("exportCsvBtn"),
   themeToggle: document.getElementById("themeToggle"),
@@ -123,12 +146,28 @@ function init() {
   els.waterDate.valueAsDate = today;
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
   bindEvents();
+  updateRepairCounterOptions();
   loadData();
 }
 
 function bindEvents() {
   els.saveConfigBtn.addEventListener("click", saveConfig);
   els.refreshBtn.addEventListener("click", loadData);
+  els.repairSearchBtn.addEventListener("click", openRepairSearch);
+  els.closeRepairBtn.addEventListener("click", () => { els.repairPanel.hidden = true; });
+  [els.repairCategory, els.repairCounter, els.repairFrom, els.repairTo, els.repairYear, els.repairMonth, els.repairSuspiciousOnly]
+    .forEach(element => element.addEventListener("change", () => {
+      if (element === els.repairCategory) updateRepairCounterOptions();
+      renderRepairSearch();
+    }));
+  els.repairResults.addEventListener("click", addRepairFromSearch);
+  els.repairQueue.addEventListener("input", updateRepairQueueField);
+  els.repairQueue.addEventListener("change", updateRepairQueueField);
+  els.repairQueue.addEventListener("click", removeRepairFromQueue);
+  els.previewRepairBtn.addEventListener("click", previewRepairBatch);
+  els.clearRepairBtn.addEventListener("click", clearRepairQueue);
+  els.cancelRepairPreviewBtn.addEventListener("click", cancelRepairPreview);
+  els.confirmRepairBtn.addEventListener("click", confirmRepairBatch);
   els.importHistoryBtn.addEventListener("click", importHistoricalReadings);
   els.exportCsvBtn.addEventListener("click", exportCsv);
   els.themeToggle.addEventListener("click", toggleTheme);
@@ -178,6 +217,7 @@ function saveConfig() {
 
 async function loadData() {
   if (!state.apiUrl) {
+    state.readingsSynced = false;
     setStatus("Configura la URL de Apps Script");
     render();
     return false;
@@ -189,14 +229,18 @@ async function loadData() {
     const json = await response.json();
     if (!json.ok) throw new Error(json.error || "Respuesta no válida");
     state.readings = normalizeRows(json.data || []);
+    state.readingsSynced = true;
     setStatus("Datos sincronizados con Google Sheets");
     fillPreviousReadings();
     render();
+    renderRepairSearch();
     return true;
   } catch (error) {
+    state.readingsSynced = false;
     setStatus(`Error: ${error.message}`);
     fillPreviousReadings();
     render();
+    renderRepairSearch();
     return false;
   }
 }
@@ -280,6 +324,252 @@ async function importHistoricalReadings() {
     els.importHistoryBtn.disabled = false;
     els.importHistoryBtn.textContent = "Importar lecturas históricas";
   }
+}
+
+async function openRepairSearch() {
+  els.repairPanel.hidden = false;
+  if (state.apiUrl) {
+    const synced = await loadData();
+    els.repairSearchStatus.textContent = synced
+      ? `Se cargaron ${state.readings.length} lecturas desde Google Sheets.`
+      : "No se pudo actualizar desde Google Sheets. Comprueba la conexión antes de preparar una reparación.";
+  } else {
+    els.repairSearchStatus.textContent = "Configura la URL de Apps Script para buscar las lecturas reales de Google Sheets.";
+  }
+  renderRepairSearch();
+  els.repairPanel.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
+
+function updateRepairCounterOptions() {
+  const category = els.repairCategory.value;
+  const counters = [...CATEGORIES.electric.counters, ...CATEGORIES.water.counters]
+    .filter(counter => !category || CATEGORIES[category === "Electricidad" ? "electric" : "water"].counters.some(item => item.name === counter.name))
+    .map(counter => counter.name);
+  const selected = els.repairCounter.value;
+  els.repairCounter.innerHTML = `<option value="">Todos</option>${counters.map(counter => `<option value="${escapeHtml(counter)}">${escapeHtml(counter)}</option>`).join("")}`;
+  if (counters.includes(selected)) els.repairCounter.value = selected;
+}
+
+function repairAnomalies() {
+  const byCounter = new Map();
+  const identityCounts = new Map();
+  state.readings.forEach(row => {
+    byCounter.set(row.Contador, (byCounter.get(row.Contador) || []).concat(row));
+    const key = identityKey(row);
+    identityCounts.set(key, (identityCounts.get(key) || 0) + 1);
+  });
+  const flags = new Map();
+  byCounter.forEach((rows, counter) => {
+    rows.sort((a, b) => a.Fecha.localeCompare(b.Fecha));
+    const increments = [];
+    let previous = null;
+    rows.forEach(row => {
+      const current = numberValue(row["Lectura Actual"]);
+      const delta = previous ? current - numberValue(previous["Lectura Actual"]) : null;
+      const rowFlags = [];
+      if (identityCounts.get(identityKey(row)) > 1) rowFlags.push("Duplicado");
+      if (previous && delta < 0) rowFlags.push("Lectura inferior a la anterior");
+      flags.set(identityKey(row), rowFlags);
+      if (delta != null && delta >= 0) increments.push(delta);
+      previous = row;
+    });
+    if (increments.length >= 4) {
+      const median = medianValue(increments);
+      const deviations = increments.map(value => Math.abs(value - median));
+      const mad = medianValue(deviations);
+      const threshold = mad > 0 ? median + 6 * mad : median * 4;
+      previous = null;
+      rows.forEach(row => {
+        if (previous) {
+          const delta = numberValue(row["Lectura Actual"]) - numberValue(previous["Lectura Actual"]);
+          if (delta >= 0 && delta > threshold) flags.get(identityKey(row)).push("Salto anormal frente al histórico");
+        }
+        previous = row;
+      });
+    }
+  });
+  return flags;
+}
+
+function medianValue(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function renderRepairSearch() {
+  if (!els.repairResults) return;
+  const category = els.repairCategory.value;
+  const counter = els.repairCounter.value;
+  const from = els.repairFrom.value;
+  const to = els.repairTo.value;
+  const year = els.repairYear.value.trim();
+  const month = els.repairMonth.value;
+  const flags = repairAnomalies();
+  const sourceRows = state.readingsSynced ? state.readings : [];
+  const rows = sourceRows.filter(row => {
+    const dateParts = row.Fecha.split("-");
+    const anomalyList = flags.get(identityKey(row)) || [];
+    return (!category || row.Categoria === category) && (!counter || row.Contador === counter) &&
+      (!from || row.Fecha >= from) && (!to || row.Fecha <= to) && (!year || dateParts[0] === year) &&
+      (!month || dateParts[1] === month) && (!els.repairSuspiciousOnly.checked || anomalyList.length > 0);
+  }).sort((a, b) => b.Fecha.localeCompare(a.Fecha) || a.Contador.localeCompare(b.Contador));
+  els.repairSearchStatus.textContent = state.readingsSynced
+    ? `${rows.length} de ${state.readings.length} lecturas · los saltos son una señal estadística para revisión, no un diagnóstico automático.`
+    : "Sin sincronización reciente: conecta con Apps Script o pulsa Actualizar antes de buscar reparaciones.";
+  els.repairResults.innerHTML = rows.map(row => {
+    const key = encodeURIComponent(identityKey(row));
+    const rowFlags = flags.get(identityKey(row)) || [];
+    const queued = state.repairQueue.some(item => identityKey(item.original) === identityKey(row));
+    const duplicates = rowFlags.includes("Duplicado");
+    return `<tr class="${rowFlags.length ? "suspicious-row" : ""}">
+      <td>${formatDate(row.Fecha)}</td><td>${escapeHtml(row.Categoria)}</td><td>${escapeHtml(row.Contador)}</td>
+      <td>${fmt(row["Lectura Anterior"])}</td><td>${fmt(row["Lectura Actual"])}</td><td>${fmt(row.Consumo)} ${escapeHtml(row.Unidad)}</td>
+      <td>${rowFlags.length ? escapeHtml(rowFlags.join(" · ")) : "—"}</td>
+      <td>${duplicates ? "Revisar duplicado" : queued ? "En reparación" : `<button type="button" data-repair-add="${key}">Añadir</button>`}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="8">No hay lecturas que coincidan con estos filtros.</td></tr>`;
+}
+
+function addRepairFromSearch(event) {
+  const button = event.target.closest("[data-repair-add]");
+  if (!button || !state.apiUrl || !state.readingsSynced) return;
+  const key = decodeURIComponent(button.dataset.repairAdd);
+  const row = state.readings.find(item => identityKey(item) === key);
+  if (!row) return;
+  if (state.readings.filter(item => sameIdentity(item, row)).length !== 1) {
+    showToast("No se puede reparar una identidad duplicada hasta revisar manualmente esas filas.", "error");
+    return;
+  }
+  if (state.repairQueue.some(item => identityKey(item.original) === key)) return;
+  state.repairQueue.push({ original: { ...row }, row: { ...row } });
+  invalidateRepairPreview();
+  renderRepairQueue();
+  renderRepairSearch();
+}
+
+function renderRepairQueue() {
+  els.repairQueue.innerHTML = state.repairQueue.map((item, index) => `
+    <tr>
+      <td>${formatDate(item.original.Fecha)}</td><td>${escapeHtml(item.original.Contador)}</td><td>${fmt(item.original["Lectura Actual"])}</td>
+      <td><input type="date" aria-label="Nueva fecha de ${escapeHtml(item.original.Contador)}" data-repair-index="${index}" data-repair-field="Fecha" value="${escapeHtml(item.row.Fecha)}"></td>
+      <td><input type="number" min="0" step="0.001" aria-label="Lectura corregida de ${escapeHtml(item.original.Contador)}" data-repair-index="${index}" data-repair-field="Lectura Actual" value="${escapeHtml(item.row["Lectura Actual"])}"></td>
+      <td><button type="button" data-repair-remove="${index}">Quitar</button></td>
+    </tr>`).join("") || `<tr><td colspan="6">Aún no has añadido lecturas.</td></tr>`;
+  els.previewRepairBtn.disabled = !state.repairQueue.length;
+}
+
+function updateRepairQueueField(event) {
+  const input = event.target.closest("[data-repair-index]");
+  if (!input) return;
+  const item = state.repairQueue[Number(input.dataset.repairIndex)];
+  if (!item) return;
+  const field = input.dataset.repairField;
+  item.row[field] = input.value;
+  invalidateRepairPreview();
+}
+
+function removeRepairFromQueue(event) {
+  const button = event.target.closest("[data-repair-remove]");
+  if (!button) return;
+  state.repairQueue.splice(Number(button.dataset.repairRemove), 1);
+  invalidateRepairPreview();
+  renderRepairQueue();
+  renderRepairSearch();
+}
+
+function buildRepairChanges() {
+  if (!state.repairQueue.length) throw new Error("Añade al menos una lectura a reparar.");
+  return state.repairQueue.map(item => {
+    const date = item.row.Fecha;
+    validateDate(date);
+    const current = readRequiredNumber(item.row["Lectura Actual"], item.original.Contador);
+    return {
+      original: { ...identityOf(item.original), "Lectura Actual": numberValue(item.original["Lectura Actual"]) },
+      row: {
+        Fecha: date, Categoria: item.original.Categoria, Contador: item.original.Contador,
+        "Lectura Anterior": numberValue(item.original["Lectura Anterior"]),
+        "Lectura Actual": current, Consumo: numberValue(item.original.Consumo), Unidad: item.original.Unidad
+      }
+    };
+  });
+}
+
+async function previewRepairBatch() {
+  try {
+    if (!state.apiUrl) throw new Error("Configura la URL de Apps Script antes de reparar.");
+    const changes = buildRepairChanges();
+    const response = await postRows({ action: "previewRepair", changes });
+    state.repairPreview = { changes, response };
+    renderRepairPreview(response);
+    els.repairPreview.hidden = false;
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+function renderRepairPreview(preview) {
+  const items = state.repairQueue.map((item, index) => {
+    const previous = preview.previous?.[index];
+    const next = preview.next?.[index];
+    const corrected = preview.corrected?.[index];
+    return `<li><strong>${escapeHtml(item.original.Contador)} · ${formatDate(item.original.Fecha)}</strong>: ${fmt(item.original["Lectura Actual"])} → ${fmt(corrected?.["Lectura Actual"])} el ${formatDate(corrected?.Fecha || item.row.Fecha)}; referencia anterior: ${previous ? `${fmt(previous["Lectura Actual"])} (${formatDate(previous.Fecha)})` : "primera lectura"}; siguiente: ${next ? `${fmt(next["Lectura Actual"])} (${formatDate(next.Fecha)})` : "sin lectura posterior"}.</li>`;
+  }).join("");
+  const impacts = (preview.affected || []).map(item => `<tr><td>${formatDate(item.Fecha)}</td><td>${escapeHtml(item.Contador)}</td><td>${item.original == null ? "Nueva" : fmt(item.original)}</td><td>${fmt(item.corrected)}</td><td>${item.consumptionOriginal == null ? "—" : fmt(item.consumptionOriginal)}</td><td>${fmt(item.consumption)}</td></tr>`).join("");
+  const backupNotice = preview.affectedCount > 1
+    ? "Antes de guardar se creará y verificará una copia completa del Spreadsheet en Drive."
+    : "Esta reparación afecta a una fila y no genera una copia adicional.";
+  els.repairPreviewDetails.innerHTML = `<p>Filas de esta secuencia que cambiarán: <strong>${Number(preview.affectedCount) || 0}</strong>.</p><p>${backupNotice}</p>
+    <p>Valores de referencia y corrección solicitada:</p><ul>${items}</ul>
+    <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Contador</th><th>Lectura anterior</th><th>Nueva lectura</th><th>Consumo actual</th><th>Consumo nuevo</th></tr></thead><tbody>${impacts || `<tr><td colspan="6">No habrá cambios en las filas.</td></tr>`}</tbody></table></div>`;
+  els.repairPreviewIssues.innerHTML = preview.issues?.length
+    ? `<strong>No se puede confirmar todavía:</strong><ul>${preview.issues.map(issue => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>`
+    : "La secuencia es coherente. Al confirmar se guardarán las correcciones, se recalcularán solo estos contadores y se registrará la auditoría.";
+  els.confirmRepairBtn.disabled = !preview.canConfirm || !(preview.affectedCount > 0);
+}
+
+async function confirmRepairBatch() {
+  if (!state.repairPreview?.response?.canConfirm || els.confirmRepairBtn.disabled) return;
+  try {
+    els.confirmRepairBtn.disabled = true;
+    els.confirmRepairBtn.textContent = "Guardando reparación…";
+    const result = await postRows({ action: "repairReadings", changes: state.repairPreview.changes, expectedSignature: state.repairPreview.response.signature, confirmed: true });
+    state.repairQueue = [];
+    state.repairPreview = null;
+    els.repairPreview.hidden = true;
+    renderRepairQueue();
+    const synced = await loadData();
+    const backupText = result.backup ? ` Copia completa: ${result.backup.name}.` : "";
+    showToast(synced ? `Reparación guardada (${result.repaired} correcciones, ${result.affected} filas recalculadas).${backupText}` : "Reparación guardada, pero no se pudo recargar la vista. Actualiza los datos.", synced ? "ok" : "error");
+  } catch (error) {
+    els.repairPreviewIssues.textContent = error.message;
+    els.repairPreview.hidden = false;
+    state.repairPreview = null;
+    els.confirmRepairBtn.disabled = true;
+  } finally {
+    els.confirmRepairBtn.textContent = "Confirmar reparación";
+    renderRepairSearch();
+  }
+}
+
+function cancelRepairPreview() {
+  state.repairPreview = null;
+  els.repairPreview.hidden = true;
+  renderRepairSearch();
+}
+
+function clearRepairQueue() {
+  state.repairQueue = [];
+  state.repairPreview = null;
+  els.repairPreview.hidden = true;
+  renderRepairQueue();
+  renderRepairSearch();
+}
+
+function invalidateRepairPreview() {
+  state.repairPreview = null;
+  if (els.repairPreview) els.repairPreview.hidden = true;
 }
 
 async function postRows(payload) {

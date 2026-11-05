@@ -172,6 +172,73 @@ main {
   font-weight: 700;
 }
 
+.repair-panel[hidden], .repair-preview[hidden] { display: none; }
+
+.repair-panel {
+  border-top: 4px solid var(--accent);
+}
+
+.repair-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.repair-head p, .repair-queue > p {
+  color: var(--muted);
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.repair-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.repair-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 12px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.repair-toggle input { width: auto; min-height: auto; }
+
+.repair-queue, .repair-preview {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.repair-queue h3, .repair-preview h3 { font-size: 16px; }
+
+.repair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.repair-preview ul { padding-left: 22px; line-height: 1.55; }
+
+.repair-issues {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+.repair-issues:has(strong) { border-color: var(--danger); }
+
+.suspicious-row { background: color-mix(in srgb, var(--electric-soft) 70%, var(--panel)); }
+
+.repair-panel table { min-width: 930px; }
+
 .chronology-info {
   margin: 12px 0;
   padding: 10px 12px;
@@ -342,6 +409,8 @@ thead th {
     grid-template-columns: repeat(2, minmax(160px, 1fr));
   }
 
+  .repair-filters { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -352,6 +421,10 @@ thead th {
   .config-panel, .cards, .water-cards, .charts, .filters, .form-actions, .main-tabs {
     grid-template-columns: 1fr;
   }
+
+  .repair-filters { grid-template-columns: 1fr; }
+
+  .repair-head { flex-direction: column; }
 
   .top-actions {
     width: 100%;

@@ -94,11 +94,21 @@ Si el contador ya tiene una fila para esa fecha, la web pide editar la fila exis
 
 1. Busca la lectura en la tabla del contador. Los filtros Desde/Hasta también se aplican a la tabla.
 2. Pulsa **Editar** en la fila. El formulario muestra el contador y la fecha originales; los otros contadores quedan desactivados.
-3. Cambia la fecha o la lectura actual y pulsa **Guardar cambios**. La validación compara la nueva lectura con sus vecinas cronológicas, excluyendo el registro antiguo. Por eso se pueden corregir errores con ceros de más aunque el valor nuevo sea menor que el que se guardó por error.
+3. Cambia la fecha o la lectura actual y pulsa **Guardar cambios**. La validación compara la nueva lectura con sus vecinas cronológicas, excluyendo el registro antiguo. Esta edición ordinaria solo se acepta si la secuencia completa queda coherente.
 4. La fila original se actualiza en Google Sheets y se recalculan la lectura anterior y el consumo del contador, incluidos los registros posteriores. Los demás contadores no cambian.
 5. **Cancelar edición** abandona la corrección sin enviar cambios.
 
 El identificador lógico es **fecha + categoría + contador**. No se añade una columna ni se cambia el esquema de siete columnas. Si ya hay varias filas para el mismo contador y fecha, no se elige ni elimina ninguna automáticamente: el Apps Script rechaza la operación y esas filas deben revisarse manualmente después de crear una copia de seguridad. El CSV y `seedData.js` incluidos no tienen esas colisiones; el contenido actual de Google Sheets debe comprobarse por separado.
+
+## Buscar y reparar lecturas históricas
+
+`BUSCAR / REPARAR LECTURAS` consulta las lecturas obtenidas de Google Sheets al actualizar la aplicación. Permite filtrar por categoría, contador, fechas, año y mes, mostrar todo el histórico de un contador y revisar filas duplicadas, secuencias decrecientes o saltos estadísticos. La marca de salto usa una regla descriptiva basada en la mediana de incrementos del contador (mediana + seis desviaciones absolutas medianas; si estas son cero, cuatro veces la mediana). Es una señal para revisión humana, no una conclusión sobre el estado del contador.
+
+Para una reparación, añade una o varias lecturas al lote, cambia su fecha y/o lectura actual y pulsa **Revisar reparación**. Apps Script devuelve una vista previa sin escribir: lectura original y corregida, vecinas, consumos afectados e indicación de inconsistencias. Si la secuencia sigue decreciendo, incluye en el mismo lote las demás lecturas erróneas necesarias. **Confirmar reparación** revalida los datos bajo `LockService`, compara la huella del contador con la vista previa, rechaza duplicados o cambios concurrentes y solo escribe si todo el tramo es coherente. Cancelar la vista previa no cambia Google Sheets.
+
+Las reparaciones actualizan solo las filas cuyo dato o consumo recalculado cambia; no borran filas. Se registra cada lectura modificada o recalculada en una hoja separada `Registro de reparaciones`, sin cambiar las siete columnas de `Lecturas`. Si se afectan varias filas, Apps Script crea y verifica una copia completa del Spreadsheet antes de escribir. La copia usa Drive y requiere autorización de Apps Script para Google Drive. Las operaciones normales `saveBatch` e `importBatch` siguen rechazando lecturas decrecientes.
+
+La búsqueda requiere una conexión reciente a Apps Script. Si falla la carga desde Google Sheets, la pantalla no ofrece resultados antiguos como si fueran datos actuales.
 
 ## Orden y gráficas
 
@@ -133,6 +143,8 @@ Las escrituras validan todos los datos antes de modificar la hoja, cambian únic
 - Leer datos desde Google Sheets.
 - Actualizar datos.
 - Editar y corregir una lectura existente por fecha y contador.
+- Buscar el histórico por contador, categoría, rango de fechas, año y mes.
+- Preparar reparaciones históricas con vista previa, confirmación, auditoría y recalculo atómico por contador.
 - Recalcular consumos posteriores del mismo contador tras una inserción o corrección.
 - Exportar CSV con la nueva estructura.
 - Tema claro/oscuro.
@@ -143,5 +155,24 @@ Las escrituras validan todos los datos antes de modificar la hoja, cambian únic
 
 ## Pruebas locales
 
-Con Node.js instalado, ejecuta `node --test tests/regression.test.js`. Las pruebas usan una hoja de cálculo simulada y verifican altas atrasadas y futuras, ediciones, correcciones de cifras, cambios de fecha, recálculo, validaciones, duplicados, restauración ante fallos y actualización de la interfaz. No escriben en la hoja real ni sustituyen una prueba de despliegue de Apps Script.
+Con Node.js instalado, ejecuta `node --test tests/regression.test.js`. Las pruebas usan datos ficticios y una hoja simulada para comprobar reparaciones descendentes, lotes de errores consecutivos, copia de seguridad simulada, auditoría, recalculo aislado por contador, duplicados, cancelación, recuperación ante fallos, búsqueda por fecha/año/mes y alta normal. No escriben en la hoja real ni sustituyen una prueba de despliegue de Apps Script.
+
+## Endpoints de Apps Script
+
+- `GET /exec` (también admite `?action=list`): devuelve `{ ok, data }` con todas las filas de `Lecturas`.
+- `POST { action: "saveBatch", rows }`: alta normal con deduplicado y recálculo; no admite lecturas decrecientes.
+- `POST { action: "importBatch", rows }`: importación idempotente del histórico con las mismas validaciones.
+- `POST { action: "updateReading", original, row }`: edición ordinaria de una fila existente.
+- `POST { action: "previewRepair", changes }`: solo lectura; devuelve valores afectados, incidencias y una firma de la secuencia revisada.
+- `POST { action: "repairReadings", changes, expectedSignature, confirmed: true }`: confirma expresamente un lote reparado, vuelve a validar bajo bloqueo, escribe auditoría y crea copia completa previa si hay varias filas afectadas.
+
+## Publicar la actualización
+
+1. Prueba primero el código en una copia del Spreadsheet, con la aplicación apuntando al endpoint de esa copia.
+2. En el proyecto de Apps Script que está vinculado al Spreadsheet de producción, reemplaza el contenido de `Código.gs` por `appscript.gs` y guarda.
+3. Ejecuta `authorizeRepairDrive` desde el editor para confirmar el acceso a Drive y aceptar el ámbito nuevo solicitado; la función solo lee el tipo del archivo y no crea copias ni altera datos. Ejecuta también `doGet` para validar la lectura. No autorices ni continúes si el proyecto no es el vinculado al Sheet esperado.
+4. En **Implementar → Gestionar implementaciones**, edita la implementación web activa, selecciona **Nueva versión** e implementa. Conserva tipo de implementación, acceso y URL `/exec` actuales; no crees una implementación nueva.
+5. Verifica con `GET /exec` que devuelve `{ ok: true }` y las lecturas existentes. Luego abre GitHub Pages y comprueba que la web vuelve a cargar esos datos. No hagas altas ni correcciones de prueba en el Sheet de producción.
+
+El código usa `SpreadsheetApp.getActiveSpreadsheet()` y la pestaña existente `Lecturas`; no contiene un Spreadsheet ID literal ni reconstruye el histórico. La publicación de GitHub Pages y el despliegue de Apps Script son operaciones separadas.
 
